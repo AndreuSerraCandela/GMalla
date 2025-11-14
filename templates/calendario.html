@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GMalla - Calendario de Incidencias</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <!-- Modal de Detalle de Incidencia -->
+    <div id="detalle-modal" class="modal">
+        <div class="modal-content modal-detalle">
+            <span class="close" id="close-detalle">&times;</span>
+            <div class="modal-header-detalle">
+                <h2>📋 Detalle de Incidencia</h2>
+                <button id="imprimir-pdf-btn" class="btn-imprimir-pdf">🖨️ Imprimir PDF</button>
+            </div>
+            <div id="detalle-contenido">
+                <div class="loading">Cargando detalle...</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal de Login -->
+    <div id="login-modal" class="modal">
+        <div class="modal-content">
+            <span class="close">&times;</span>
+            <h2>🔐 Iniciar Sesión - GTask</h2>
+            <form id="login-form">
+                <div class="form-group">
+                    <label for="username">Usuario:</label>
+                    <input type="text" id="username" name="username" required>
+                </div>
+                <div class="form-group">
+                    <label for="password">Contraseña:</label>
+                    <input type="password" id="password" name="password" required>
+                </div>
+                <button type="submit" class="btn-login">Iniciar Sesión</button>
+                <div id="login-error" class="error-message"></div>
+            </form>
+        </div>
+    </div>
+
+    <div class="container">
+        <header>
+            <div class="header-top">
+                <h1>📅 GMalla - Calendario de Incidencias</h1>
+                <div class="auth-section">
+                    <div id="user-info" class="user-info" style="display: none;">
+                        <span id="user-name"></span>
+                        <button id="logout-btn" class="btn-logout">Cerrar Sesión</button>
+                    </div>
+                    <button id="login-btn" class="btn-login-header">Iniciar Sesión</button>
+                </div>
+            </div>
+            <div class="controls">
+                <button id="refrescar-btn">🔄 Refrescar</button>
+                <button id="anterior-btn">◀ Semana Anterior</button>
+                <h2 id="semana-actual"></h2>
+                <button id="siguiente-btn">Semana Siguiente ▶</button>
+            </div>
+        </header>
+
+        <div class="calendario-container">
+            <div class="calendario-tabla-wrapper">
+                <table class="calendario-tabla" id="calendario-tabla">
+                    <thead>
+                        <tr>
+                            <th class="col-usuario">Usuario</th>
+                            <!-- Los días se generarán dinámicamente -->
+                        </tr>
+                    </thead>
+                    <tbody id="calendario-body">
+                        <!-- Las filas de usuarios se generarán dinámicamente -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="incidencias-libres" id="incidencias-libres">
+            <h3>📋 Incidencias sin asignar</h3>
+            <div id="lista-incidencias-libres"></div>
+        </div>
+    </div>
+
+    <!-- Librerías para PDF y QR -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+    <script src="{{ url_for('static', filename='calendario.js') }}"></script>
+</body>
+</html>
+

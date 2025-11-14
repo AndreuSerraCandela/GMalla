@@ -1,0 +1,13 @@
+# Dependencias del proyecto GMalla
+# Cliente HTTP para comunicación con Business Central
+requests>=2.31.0
+
+# Manejo de fechas y horas
+python-dateutil>=2.8.2
+
+# Utilidades adicionales
+python-dotenv>=1.0.0
+
+# Framework web
+Flask>=3.0.0
+
