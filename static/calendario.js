@@ -5,7 +5,8 @@ let estado = {
     incidencias: [],
     asignaciones: {}, // { usuario_id: { fecha: [incidencias] } }
     autenticado: false,
-    usuarioActual: null
+    usuarioActual: null,
+    usuariosFiltrados: null // null = todos, Set de IDs = usuarios filtrados
 };
 
 // Inicialización
@@ -37,6 +38,15 @@ document.addEventListener('DOMContentLoaded', () => {
             cerrarModal();
         }
     });
+    
+    // Filtro de usuarios
+    document.getElementById('filtro-usuarios-btn').addEventListener('click', toggleFiltroPanel);
+    document.getElementById('cerrar-filtro-btn').addEventListener('click', cerrarFiltroPanel);
+    document.getElementById('seleccionar-todos-btn').addEventListener('click', seleccionarTodosUsuarios);
+    document.getElementById('deseleccionar-todos-btn').addEventListener('click', deseleccionarTodosUsuarios);
+    
+    // Cargar filtro guardado
+    cargarFiltroUsuarios();
 });
 
 // Verificar estado de autenticación
@@ -192,6 +202,10 @@ async function cargarDatos() {
         cargarUsuarios(),
         cargarIncidencias()
     ]);
+    
+    // Actualizar lista de filtro después de cargar usuarios
+    actualizarListaFiltroUsuarios();
+    
     generarCalendario();
 }
 
@@ -343,12 +357,23 @@ function generarCalendario() {
         `Semana: ${estado.fechaInicioSemana.getDate()} ${meses[estado.fechaInicioSemana.getMonth()]} - ` +
         `${fechaFin.getDate()} ${meses[fechaFin.getMonth()]} ${fechaFin.getFullYear()}`;
     
+        // Obtener usuarios a mostrar (aplicar filtro si existe)
+        let usuariosAMostrar = estado.usuarios;
+        if (estado.usuariosFiltrados !== null) {
+            usuariosAMostrar = estado.usuarios.filter(usuario => {
+                const usuarioId = String(usuario.id || usuario.user_id || usuario.userId || usuario._id || '');
+                return estado.usuariosFiltrados.has(usuarioId);
+            });
+        }
+        
         // Generar filas de usuarios
-        if (estado.usuarios.length === 0) {
+        if (usuariosAMostrar.length === 0) {
             const tr = document.createElement('tr');
             const td = document.createElement('td');
             td.colSpan = 8;
-            td.textContent = 'No hay usuarios disponibles. Haz clic en "Refrescar" para cargar datos.';
+            td.textContent = estado.usuariosFiltrados !== null 
+                ? 'No hay usuarios seleccionados en el filtro. Usa el botón "Filtrar Usuarios" para seleccionar usuarios.'
+                : 'No hay usuarios disponibles. Haz clic en "Refrescar" para cargar datos.';
             td.style.textAlign = 'center';
             td.style.padding = '20px';
             td.style.color = '#666';
@@ -357,7 +382,7 @@ function generarCalendario() {
             return;
         }
         
-        estado.usuarios.forEach(usuario => {
+        usuariosAMostrar.forEach(usuario => {
             const tr = document.createElement('tr');
             
             // Obtener ID del usuario de diferentes formas posibles
@@ -533,20 +558,49 @@ async function moverIncidencia(noIncidencia, usuarioOrigen, fechaOrigen, usuario
     }
 }
 
-// Mostrar incidencias libres (sin asignar)
+// Mostrar incidencias libres (sin asignar o de usuarios no filtrados)
 function mostrarIncidenciasLibres() {
     const container = document.getElementById('lista-incidencias-libres');
     if (!container) return;
     
     container.innerHTML = '';
     
-    // Filtrar incidencias sin usuario (considerando null, undefined, cadena vacía, etc.)
+    // Obtener IDs de usuarios filtrados
+    const usuariosFiltradosSet = estado.usuariosFiltrados;
+    
+    // Filtrar incidencias:
+    // 1. Sin usuario asignado
+    // 2. O asignadas a usuarios que no están en el filtro
     const incidenciasLibres = estado.incidencias.filter(inc => {
         const usuario = inc.usuario;
-        return !usuario || usuario === null || usuario === undefined || usuario === '' || usuario.trim() === '';
+        
+        // Si no tiene usuario, está libre
+        if (!usuario || usuario === null || usuario === undefined || usuario === '' || usuario.trim() === '') {
+            return true;
+        }
+        
+        // Si hay filtro activo y el usuario no está en el filtro, mostrar como libre
+        if (usuariosFiltradosSet !== null) {
+            const usuarioId = String(usuario);
+            // Buscar si el usuario está en el filtro
+            let usuarioEnFiltro = false;
+            for (const u of estado.usuarios) {
+                const id = String(u.id || u.user_id || u.userId || u._id || '');
+                if (id === usuarioId || id.includes(usuarioId) || usuarioId.includes(id)) {
+                    // Verificar si este usuario está en el filtro
+                    if (usuariosFiltradosSet.has(id)) {
+                        usuarioEnFiltro = true;
+                        break;
+                    }
+                }
+            }
+            return !usuarioEnFiltro;
+        }
+        
+        return false;
     });
     
-    console.log(`📋 Incidencias sin asignar: ${incidenciasLibres.length} de ${estado.incidencias.length} totales`);
+    console.log(`📋 Incidencias sin asignar o de usuarios no filtrados: ${incidenciasLibres.length} de ${estado.incidencias.length} totales`);
     
     if (incidenciasLibres.length === 0) {
         container.innerHTML = '<p style="color: #666;">No hay incidencias sin asignar</p>';
@@ -637,23 +691,17 @@ function mostrarDetalleIncidencia(detalle) {
     const userId = detalle.user || detalle.user_name;
     const nombreUsuario = obtenerNombreUsuario(userId);
     
-    // Formatear geolocalización (puntoX es longitud, puntoY es latitud)
-    let geolocalizacionHTML = '';
+    // Formatear geolocalización (puntoX es longitud, puntoY es latitud) - solo el icono
+    let geolocalizacionIcono = '';
     if (detalle.puntoX && detalle.puntoY) {
         const lng = parseFloat(detalle.puntoX); // Longitud
         const lat = parseFloat(detalle.puntoY); // Latitud
         if (!isNaN(lat) && !isNaN(lng)) {
             const mapsUrl = `https://www.google.com/maps?q=${lat},${lng}`;
-            geolocalizacionHTML = `
-                <div class="detalle-campo">
-                    <label>Ubicación:</label>
-                    <p>
-                        <span class="geolocalizacion-info">${lat.toFixed(6)}, ${lng.toFixed(6)}</span>
-                        <a href="${mapsUrl}" target="_blank" class="geolocalizacion-icon" title="Abrir en Google Maps">
-                            📍
-                        </a>
-                    </p>
-                </div>
+            geolocalizacionIcono = `
+                <a href="${mapsUrl}" target="_blank" class="geolocalizacion-icon" title="Abrir en Google Maps" style="margin-left: 10px; text-decoration: none; font-size: 1.2em;">
+                    📍
+                </a>
             `;
         }
     }
@@ -667,7 +715,6 @@ function mostrarDetalleIncidencia(detalle) {
                 imagenesHTML += `
                     <div class="imagen-item">
                         <img src="${img.url}" alt="${img.name || 'Imagen'}" onclick="abrirImagenGrande('${img.url}')">
-                        <p>${img.name || 'Sin nombre'}</p>
                     </div>
                 `;
             }
@@ -704,28 +751,31 @@ function mostrarDetalleIncidencia(detalle) {
                 <label>Descripción:</label>
                 <textarea id="edit-descripcion" class="detalle-input" rows="4">${descripcionTexto}</textarea>
             </div>
-            <div class="detalle-campo">
-                <label>Estado:</label>
-                <p><span class="estado-badge estado-${(detalle.state || '').toLowerCase()}">${formatearEstado(detalle.state) || 'N/A'}</span></p>
+            <div style="display: flex; gap: 20px; align-items: flex-start;">
+                <div class="detalle-campo" style="flex: 1;">
+                    <label>Estado:</label>
+                    <p><span class="estado-badge estado-${(detalle.state || '').toLowerCase()}">${formatearEstado(detalle.state) || 'N/A'}</span></p>
+                </div>
+                <div class="detalle-campo" style="flex: 1;">
+                    <label>Fecha/Hora:</label>
+                    <input type="datetime-local" id="edit-fecha-hora" class="detalle-input" value="${fechaHoraInput}">
+                </div>
+            </div>
+            <div style="display: flex; gap: 20px; align-items: flex-start;">
+                <div class="detalle-campo" style="flex: 1;">
+                    <label>Tipo de Incidencia:</label>
+                    <p>${detalle.incidenceType || 'N/A'}</p>
+                </div>
+                <div class="detalle-campo" style="flex: 1;">
+                    <label>Usuario:</label>
+                    <p>${nombreUsuario}</p>
+                </div>
             </div>
             <div class="detalle-campo">
-                <label>Tipo de Incidencia:</label>
-                <p>${detalle.incidenceType || 'N/A'}</p>
-            </div>
-            <div class="detalle-campo">
-                <label>Elemento:</label>
+                <label>Elemento:${geolocalizacionIcono}</label>
                 <p>${detalle.resource || 'N/A'}</p>
                 ${detalle.resource_name ? `<p class="detalle-subcampo">${detalle.resource_name}</p>` : ''}
             </div>
-            <div class="detalle-campo">
-                <label>Fecha/Hora:</label>
-                <input type="datetime-local" id="edit-fecha-hora" class="detalle-input" value="${fechaHoraInput}">
-            </div>
-            <div class="detalle-campo">
-                <label>Usuario:</label>
-                <p>${nombreUsuario}</p>
-            </div>
-            ${geolocalizacionHTML}
             <div class="detalle-acciones">
                 <button id="guardar-cambios-btn" class="btn-guardar">💾 Guardar Cambios</button>
                 <span id="guardar-mensaje" class="guardar-mensaje"></span>
@@ -744,6 +794,21 @@ function mostrarDetalleIncidencia(detalle) {
 }
 
 // Guardar cambios de la incidencia
+// Funciones para mostrar/ocultar overlay de carga
+function mostrarOverlayCarga() {
+    const overlay = document.getElementById('loading-overlay');
+    if (overlay) {
+        overlay.classList.add('active');
+    }
+}
+
+function ocultarOverlayCarga() {
+    const overlay = document.getElementById('loading-overlay');
+    if (overlay) {
+        overlay.classList.remove('active');
+    }
+}
+
 async function guardarCambiosIncidencia() {
     if (!detalleActual || !idGtaskActual) {
         alert('No hay detalle de incidencia disponible');
@@ -805,6 +870,9 @@ async function guardarCambiosIncidencia() {
         mensajeSpan.className = 'guardar-mensaje';
     }
     
+    // Mostrar overlay de carga
+    mostrarOverlayCarga();
+    
     try {
         // Preparar datos para enviar
         const datosActualizacion = {
@@ -856,6 +924,9 @@ async function guardarCambiosIncidencia() {
             alert(`Error de conexión: ${error.message}`);
         }
     } finally {
+        // Ocultar overlay de carga
+        ocultarOverlayCarga();
+        
         // Rehabilitar botón
         if (guardarBtn) {
             guardarBtn.disabled = false;
@@ -974,12 +1045,27 @@ async function generarPDF(detalle, idGtask) {
         doc.text(descripcionLines, margin, yPos);
         yPos += descripcionLines.length * lineHeight + 3;
         
-        // Estado
+        // Estado y Fecha en la misma línea
+        const mitadAncho = contentWidth / 2;
         doc.setFont('helvetica', 'bold');
         doc.text('Estado:', margin, yPos);
-        yPos += lineHeight;
         doc.setFont('helvetica', 'normal');
-        doc.text(formatearEstado(detalle.state) || 'N/A', margin, yPos);
+        doc.text(formatearEstado(detalle.state) || 'N/A', margin + 20, yPos);
+        
+        // Fecha a la derecha
+        doc.setFont('helvetica', 'bold');
+        doc.text('Fecha:', margin + mitadAncho, yPos);
+        doc.setFont('helvetica', 'normal');
+        let fechaTexto = 'N/A';
+        if (detalle.fecha) {
+            try {
+                const fecha = new Date(detalle.fecha);
+                fechaTexto = fecha.toLocaleString('es-ES');
+            } catch {
+                fechaTexto = detalle.fecha;
+            }
+        }
+        doc.text(fechaTexto, margin + mitadAncho + 20, yPos);
         yPos += lineHeight + 3;
         
         // Tipo de Incidencia
@@ -990,17 +1076,24 @@ async function generarPDF(detalle, idGtask) {
         doc.text(detalle.incidenceType || 'N/A', margin, yPos);
         yPos += lineHeight + 3;
         
-        // Elemento
+        // Elemento y Usuario en la misma línea
         doc.setFont('helvetica', 'bold');
         doc.text('Elemento:', margin, yPos);
-        yPos += lineHeight;
         doc.setFont('helvetica', 'normal');
-        doc.text(detalle.resource || 'N/A', margin, yPos);
+        doc.text(detalle.resource || 'N/A', margin , yPos+lineHeight-3);
+        
+        // Usuario a la derecha
+        doc.setFont('helvetica', 'bold');
+        doc.text('Usuario:', margin + mitadAncho, yPos);
+        doc.setFont('helvetica', 'normal');
+        const userId = detalle.user || detalle.user_name;
+        const nombreUsuario = obtenerNombreUsuario(userId);
+        doc.text(nombreUsuario, margin + mitadAncho + 20, yPos);
         yPos += lineHeight;
         if (detalle.resource_name) {
             doc.setFont('helvetica', 'italic');
             doc.setFontSize(10);
-            doc.text(detalle.resource_name, margin + 5, yPos);
+            doc.text(detalle.resource_name, margin + 10, yPos);
             doc.setFontSize(12);
             doc.setFont('helvetica', 'normal');
             yPos += lineHeight;
@@ -1057,33 +1150,6 @@ async function generarPDF(detalle, idGtask) {
         }
         yPos += 3;
         
-        // Fecha
-        doc.setFont('helvetica', 'bold');
-        doc.text('Fecha:', margin, yPos);
-        yPos += lineHeight;
-        doc.setFont('helvetica', 'normal');
-        let fechaTexto = 'N/A';
-        if (detalle.fecha) {
-            try {
-                const fecha = new Date(detalle.fecha);
-                fechaTexto = fecha.toLocaleString('es-ES');
-            } catch {
-                fechaTexto = detalle.fecha;
-            }
-        }
-        doc.text(fechaTexto, margin, yPos);
-        yPos += lineHeight + 3;
-        
-        // Usuario
-        doc.setFont('helvetica', 'bold');
-        doc.text('Usuario:', margin, yPos);
-        yPos += lineHeight;
-        doc.setFont('helvetica', 'normal');
-        const userId = detalle.user || detalle.user_name;
-        const nombreUsuario = obtenerNombreUsuario(userId);
-        doc.text(nombreUsuario, margin, yPos);
-        yPos += lineHeight + 3;
-        
         // La geolocalización ya se añadió debajo del Elemento con el QR
         
         // Imágenes (usar ancho completo de página ya que el QR no interfiere aquí)
@@ -1117,17 +1183,9 @@ async function generarPDF(detalle, idGtask) {
                             
                             doc.addImage(imgData, 'JPEG', currentX, yPos, imageWidth, imageHeight);
                             
-                            // Nombre de la imagen debajo
-                            doc.setFontSize(8);
-                            doc.setFont('helvetica', 'normal');
-                            const nombreImg = img.name || 'Sin nombre';
-                            const nombreImgLines = doc.splitTextToSize(nombreImg, imageWidth);
-                            doc.text(nombreImgLines, currentX, yPos + imageHeight + 5);
-                            doc.setFontSize(12);
-                            
                             imagesInRow++;
                             if (imagesInRow >= imagesPerRow) {
-                                yPos += imageHeight + 15; // Altura de imagen + espacio para nombre
+                                yPos += imageHeight + 10; // Altura de imagen + espacio
                                 currentX = margin;
                                 imagesInRow = 0;
                             } else {
@@ -1182,6 +1240,142 @@ function loadImageAsDataUrl(url) {
         
         img.src = url;
     });
+}
+
+// ========== FUNCIONES DE FILTRO DE USUARIOS ==========
+
+// Guardar filtro en localStorage
+function guardarFiltroUsuarios() {
+    if (estado.usuariosFiltrados === null) {
+        localStorage.removeItem('usuariosFiltrados');
+    } else {
+        const idsArray = Array.from(estado.usuariosFiltrados);
+        localStorage.setItem('usuariosFiltrados', JSON.stringify(idsArray));
+    }
+}
+
+// Cargar filtro desde localStorage
+function cargarFiltroUsuarios() {
+    try {
+        const filtroGuardado = localStorage.getItem('usuariosFiltrados');
+        if (filtroGuardado) {
+            const idsArray = JSON.parse(filtroGuardado);
+            estado.usuariosFiltrados = new Set(idsArray);
+        } else {
+            estado.usuariosFiltrados = null; // null = todos los usuarios
+        }
+    } catch (error) {
+        console.error('Error al cargar filtro de usuarios:', error);
+        estado.usuariosFiltrados = null;
+    }
+}
+
+// Actualizar lista de checkboxes del filtro
+function actualizarListaFiltroUsuarios() {
+    const container = document.getElementById('lista-filtro-usuarios');
+    if (!container) return;
+    
+    container.innerHTML = '';
+    
+    if (estado.usuarios.length === 0) {
+        container.innerHTML = '<p style="color: #666;">No hay usuarios disponibles</p>';
+        return;
+    }
+    
+    estado.usuarios.forEach(usuario => {
+        const usuarioId = String(usuario.id || usuario.user_id || usuario.userId || usuario._id || '');
+        const nombreUsuario = usuario.name || usuario.username || usuario.nombre || `Usuario ${usuarioId.substring(0, 8)}`;
+        
+        const item = document.createElement('div');
+        item.className = 'filtro-usuario-item';
+        
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.id = `filtro-usuario-${usuarioId}`;
+        checkbox.value = usuarioId;
+        
+        // Marcar como seleccionado si está en el filtro (o si no hay filtro, todos están seleccionados)
+        if (estado.usuariosFiltrados === null || estado.usuariosFiltrados.has(usuarioId)) {
+            checkbox.checked = true;
+        }
+        
+        checkbox.addEventListener('change', () => {
+            actualizarFiltroDesdeCheckboxes();
+        });
+        
+        const label = document.createElement('label');
+        label.htmlFor = `filtro-usuario-${usuarioId}`;
+        label.textContent = nombreUsuario;
+        
+        item.appendChild(checkbox);
+        item.appendChild(label);
+        container.appendChild(item);
+    });
+}
+
+// Actualizar filtro desde los checkboxes
+function actualizarFiltroDesdeCheckboxes() {
+    const checkboxes = document.querySelectorAll('#lista-filtro-usuarios input[type="checkbox"]');
+    const usuariosSeleccionados = new Set();
+    
+    checkboxes.forEach(checkbox => {
+        if (checkbox.checked) {
+            usuariosSeleccionados.add(checkbox.value);
+        }
+    });
+    
+    // Si todos están seleccionados, poner null (todos)
+    if (usuariosSeleccionados.size === estado.usuarios.length) {
+        estado.usuariosFiltrados = null;
+    } else {
+        estado.usuariosFiltrados = usuariosSeleccionados;
+    }
+    
+    // Guardar filtro
+    guardarFiltroUsuarios();
+    
+    // Regenerar calendario
+    generarCalendario();
+    mostrarIncidenciasLibres();
+}
+
+// Toggle panel de filtro
+function toggleFiltroPanel() {
+    const panel = document.getElementById('filtro-usuarios-panel');
+    if (panel) {
+        if (panel.style.display === 'none') {
+            panel.style.display = 'block';
+            actualizarListaFiltroUsuarios();
+        } else {
+            panel.style.display = 'none';
+        }
+    }
+}
+
+// Cerrar panel de filtro
+function cerrarFiltroPanel() {
+    const panel = document.getElementById('filtro-usuarios-panel');
+    if (panel) {
+        panel.style.display = 'none';
+    }
+}
+
+// Seleccionar todos los usuarios
+function seleccionarTodosUsuarios() {
+    const checkboxes = document.querySelectorAll('#lista-filtro-usuarios input[type="checkbox"]');
+    checkboxes.forEach(checkbox => {
+        checkbox.checked = true;
+    });
+    actualizarFiltroDesdeCheckboxes();
+}
+
+// Deseleccionar todos los usuarios
+function deseleccionarTodosUsuarios() {
+    const checkboxes = document.querySelectorAll('#lista-filtro-usuarios input[type="checkbox"]');
+    checkboxes.forEach(checkbox => {
+        checkbox.checked = false;
+    });
+    actualizarFiltroDesdeCheckboxes();
 }
 
 // Cerrar modal de detalle

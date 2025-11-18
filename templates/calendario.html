@@ -41,6 +41,14 @@
         </div>
     </div>
 
+    <!-- Overlay de carga -->
+    <div id="loading-overlay" class="loading-overlay">
+        <div class="loading-overlay-content">
+            <h3>Creando Tarea...</h3>
+            <div class="loading-spinner"></div>
+        </div>
+    </div>
+
     <div class="container">
         <header>
             <div class="header-top">
@@ -58,6 +66,23 @@
                 <button id="anterior-btn">◀ Semana Anterior</button>
                 <h2 id="semana-actual"></h2>
                 <button id="siguiente-btn">Semana Siguiente ▶</button>
+                <button id="filtro-usuarios-btn" class="btn-filtro">🔍 Filtrar Usuarios</button>
+            </div>
+            <!-- Panel de filtro de usuarios -->
+            <div id="filtro-usuarios-panel" class="filtro-panel" style="display: none;">
+                <div class="filtro-panel-header">
+                    <h3>Filtrar Usuarios</h3>
+                    <button id="cerrar-filtro-btn" class="btn-cerrar-filtro">&times;</button>
+                </div>
+                <div class="filtro-panel-content">
+                    <div class="filtro-acciones">
+                        <button id="seleccionar-todos-btn" class="btn-filtro-accion">Seleccionar Todos</button>
+                        <button id="deseleccionar-todos-btn" class="btn-filtro-accion">Deseleccionar Todos</button>
+                    </div>
+                    <div id="lista-filtro-usuarios" class="lista-filtro-usuarios">
+                        <!-- Los checkboxes se generarán dinámicamente -->
+                    </div>
+                </div>
             </div>
         </header>
 

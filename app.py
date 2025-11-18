@@ -32,14 +32,14 @@ bc_client = BusinessCentralClient(
 gtask_client = GTaskClient(api_url=GTASK_API_URL)
 
 # Realizar login automático con credenciales por defecto para la API
-try:
-    login_result = gtask_client.login(GTASK_USERNAME, GTASK_PASSWORD)
-    if login_result['success']:
-        print(f"✅ Login automático en GTask API exitoso para usuario: {GTASK_USERNAME}")
-    else:
-        print(f"⚠️ No se pudo hacer login automático en GTask API: {login_result.get('error', 'Error desconocido')}")
-except Exception as e:
-    print(f"⚠️ Error en login automático de GTask API: {str(e)}")
+# try:
+#     login_result = gtask_client.login(GTASK_USERNAME, GTASK_PASSWORD)
+#     if login_result['success']:
+#         print(f"✅ Login automático en GTask API exitoso para usuario: {GTASK_USERNAME}")
+#     else:
+#         print(f"⚠️ No se pudo hacer login automático en GTask API: {login_result.get('error', 'Error desconocido')}")
+# except Exception as e:
+#     print(f"⚠️ Error en login automático de GTask API: {str(e)}")
 
 # Inicializar gestor de calendario
 gestor = GestorCalendario(bc_client=bc_client)
@@ -453,5 +453,5 @@ if __name__ == '__main__':
     print("📱 Abre tu navegador en: http://localhost:5000")
     print("=" * 60)
     
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    app.run(debug=True, host='127.0.0.1', port=5020)
 
