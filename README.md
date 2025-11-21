@@ -41,6 +41,19 @@ GMalla/
 └── README.md                  # Este archivo
 ```
 
+## Requisitos Previos
+
+### Instalar Python
+
+**Si Python no está instalado en tu sistema**, consulta la guía detallada en [INSTALACION_PYTHON.md](INSTALACION_PYTHON.md).
+
+**Verificar que Python está instalado:**
+```bash
+python --version
+```
+
+Deberías ver algo como: `Python 3.11.x` o `Python 3.12.x`
+
 ## Instalación
 
 1. Crear un entorno virtual (recomendado):

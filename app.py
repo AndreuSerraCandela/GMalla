@@ -450,7 +450,7 @@ def obtener_detalle_incidencia(id_gtask):
             }), 404
             
     except Exception as e:
-        print(f"❌ Error al obtener detalle de incidencia: {str(e)}")
+        print(f"[ERROR] Error al obtener detalle de incidencia: {str(e)}")
         return jsonify({
             'success': False,
             'error': str(e)
@@ -504,7 +504,7 @@ def ejecutar_asignacion_automatica():
                         incidencias_filtradas.append(incidencia)
                 
                 incidencias = incidencias_filtradas
-                print(f"📅 Filtradas {len(incidencias)} incidencias en rango {fecha_inicio_str} a {fecha_fin_str}")
+                print(f"[INFO] Filtradas {len(incidencias)} incidencias en rango {fecha_inicio_str} a {fecha_fin_str}")
             except ValueError as e:
                 return jsonify({
                     'success': False,
@@ -556,7 +556,7 @@ def ejecutar_asignacion_automatica():
     except Exception as e:
         import traceback
         error_trace = traceback.format_exc()
-        print(f"❌ Error al ejecutar asignación automática: {str(e)}")
+        print(f"[ERROR] Error al ejecutar asignacion automatica: {str(e)}")
         print(f"📋 Traceback:\n{error_trace}")
         return jsonify({
             'success': False,
@@ -572,9 +572,9 @@ if __name__ == '__main__':
     print(f"Business Central: {BUSINESS_CENTRAL_BASE_URL}")
     print(f"GTask API: {GTASK_API_URL}")
     print(f"LLM Local: {LLM_BASE_URL}")
-    print("\n🌐 Iniciando servidor web...")
-    print("📱 Abre tu navegador en: http://localhost:5020")
-    print("🤖 Asignación automática disponible en: POST /api/asignacion-automatica")
+    print("\n[WEB] Iniciando servidor web...")
+    print("[NAVEGADOR] Abre tu navegador en: http://localhost:5020")
+    print("[API] Asignacion automatica disponible en: POST /api/asignacion-automatica")
     print("=" * 60)
     
     app.run(debug=True, host='127.0.0.1', port=5020)

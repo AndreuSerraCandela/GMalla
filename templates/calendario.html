@@ -3,10 +3,66 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>GMalla - Calendario de Incidencias</title>
+    <title>GTask - Calendario de Incidencias | Grupo Malla</title>
+    
+    <!-- Favicons -->
+    <link rel="icon" type="image/png" sizes="32x32" href="{{ url_for('static', filename='images/favicon-32x32.png') }}">
+    <link rel="icon" type="image/png" sizes="16x16" href="{{ url_for('static', filename='images/favicon-16x16.png') }}">
+    <link rel="shortcut icon" href="{{ url_for('static', filename='images/favicon.ico') }}">
+    
+    <!-- Google Fonts - Montserrat -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&display=swap" rel="stylesheet">
+    
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" integrity="sha512-9usAa10IRO0HhonpyAIVpjrylPvoDwiPUiKdWk5t3PyolY1cOd4DSE0Ga+ri4AuTroPR5aQvXU9xC6qOPnzFeg==" crossorigin="anonymous" referrerpolicy="no-referrer" />
+    
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
+    <!-- Barra superior corporativa -->
+    <div class="top-bar">
+        <div class="top-bar-container">
+            <div class="top-bar-links">
+                <span class="top-bar-phone">
+                    <i class="fa fa-phone"></i>
+                    <a href="tel:+34971002800">+34 971 00 28 00</a>
+                </span>
+                <span class="top-bar-email">
+                    <i class="fa fa-envelope"></i>
+                    <a href="mailto:info@malla.es">info@malla.es</a>
+                </span>
+            </div>
+            <div class="social-icons">
+                <a href="https://www.linkedin.com/company/grupo-malla-publicidad/" target="_blank">
+                    <i class="fa-brands fa-linkedin"></i>
+                </a>
+                <a href="https://instagram.com/grupomallapublicidad?igshid=YmMyMTA2M2Y=" target="_blank">
+                    <i class="fa-brands fa-instagram"></i>
+                </a>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Navbar corporativo -->
+    <nav class="navbar-corporativo">
+        <div class="navbar-container">
+            <a class="navbar-brand" href="/">
+                <img src="{{ url_for('static', filename='images/logomalla.png') }}" alt="Grupo Malla" height="58" width="197">
+            </a>
+            <div class="navbar-title">
+                <h1>GMalla - Calendario de Incidencias</h1>
+            </div>
+            <div class="auth-section">
+                <div id="user-info" class="user-info" style="display: none;">
+                    <span id="user-name"></span>
+                    <button id="logout-btn" class="btn-logout">Cerrar Sesión</button>
+                </div>
+                <button id="login-btn" class="btn-login-header">Iniciar Sesión</button>
+            </div>
+        </div>
+    </nav>
     <!-- Modal de Detalle de Incidencia -->
     <div id="detalle-modal" class="modal">
         <div class="modal-content modal-detalle">
@@ -49,26 +105,35 @@
         </div>
     </div>
 
-    <div class="container">
-        <header>
-            <div class="header-top">
-                <h1>📅 GMalla - Calendario de Incidencias</h1>
-                <div class="auth-section">
-                    <div id="user-info" class="user-info" style="display: none;">
-                        <span id="user-name"></span>
-                        <button id="logout-btn" class="btn-logout">Cerrar Sesión</button>
-                    </div>
-                    <button id="login-btn" class="btn-login-header">Iniciar Sesión</button>
+    <div class="content-wrapper">
+        <!-- Sidebar izquierdo -->
+        <aside class="sidebar-left">
+            <div class="sidebar-section">
+                <h3>Calendario</h3>
+                <div id="mini-calendario" class="mini-calendario">
+                    <!-- Se generará dinámicamente -->
                 </div>
             </div>
+            <div class="sidebar-section">
+                <h3>Mis calendarios</h3>
+                <div id="tipos-incidencias-filtro" class="tipos-filtro">
+                    <!-- Se generará dinámicamente según tipos de incidencias -->
+                </div>
+            </div>
+            <div class="sidebar-section">
+                <div class="sidebar-buttons">
+                    <button id="refrescar-btn" class="btn-sidebar">🔄 Refrescar</button>
+                    <button id="filtro-usuarios-btn" class="btn-sidebar btn-filtro">🔍 Filtrar Usuarios</button>
+                    <button id="asignar-automatico-btn" class="btn-sidebar btn-asignar-auto">🤖 Asignar Automáticamente</button>
+                    <button id="reasignar-automatico-btn" class="btn-sidebar btn-reasignar-auto">🔄 Reasignar Automáticamente</button>
+                </div>
+            </div>
+        </aside>
+        
+        <!-- Contenido principal -->
+        <div class="main-container">
             <div class="controls">
-                <button id="refrescar-btn">🔄 Refrescar</button>
-                <button id="anterior-btn">◀ Semana Anterior</button>
                 <h2 id="semana-actual"></h2>
-                <button id="siguiente-btn">Semana Siguiente ▶</button>
-                <button id="filtro-usuarios-btn" class="btn-filtro">🔍 Filtrar Usuarios</button>
-                <button id="asignar-automatico-btn" class="btn-asignar-auto">🤖 Asignar Automáticamente</button>
-                <button id="reasignar-automatico-btn" class="btn-reasignar-auto">🔄 Reasignar Automáticamente</button>
             </div>
             <!-- Panel de filtro de usuarios -->
             <div id="filtro-usuarios-panel" class="filtro-panel" style="display: none;">
@@ -108,7 +173,20 @@
             <h3>📋 Incidencias sin asignar</h3>
             <div id="lista-incidencias-libres"></div>
         </div>
+        </div>
     </div>
+    
+    <!-- Footer corporativo -->
+    <footer class="footer-corporativo">
+        <div class="footer-container">
+            <img src="{{ url_for('static', filename='images/cabecera2.png') }}" 
+                 alt="Grupo Malla Footer" 
+                 class="footer-image">
+            <div class="footer-text">
+                <p>© 2024 Grupo Malla Publicidad</p>
+            </div>
+        </div>
+    </footer>
 
     <!-- Librerías para PDF y QR -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
