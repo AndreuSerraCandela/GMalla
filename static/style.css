@@ -285,52 +285,61 @@ body {
     gap: 15px;
 }
 
-.user-info {
+.user-icon {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    background: #f5f5f5;
+    border: 1px solid #e0e0e0;
     display: flex;
     align-items: center;
-    gap: 10px;
-    padding: 8px 15px;
-    background: #f5f5f5;
-    border-radius: 4px;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    position: relative;
     color: var(--malla-text);
-    font-weight: 500;
+    font-size: 18px;
+}
+
+.user-icon:hover {
+    background: var(--malla-hover);
+    color: white;
+    border-color: var(--malla-hover);
+    transform: scale(1.05);
+}
+
+.user-icon i {
+    pointer-events: none;
+}
+
+/* Tooltip para mostrar nombre de usuario */
+.user-icon[title]:hover::after {
+    content: attr(title);
+    position: absolute;
+    bottom: -35px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: #333;
+    color: white;
+    padding: 5px 10px;
+    border-radius: 4px;
+    font-size: 12px;
+    white-space: nowrap;
+    z-index: 1000;
+    pointer-events: none;
     font-family: 'Montserrat', sans-serif;
 }
 
-.btn-login-header,
-.btn-logout {
-    padding: 10px 20px;
-    border: none;
-    border-radius: 6px;
-    font-size: 14px;
-    cursor: pointer;
-    transition: all 0.2s ease;
-    font-weight: 500;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-}
-
-.btn-login-header {
-    background: var(--malla-primary);
-    color: var(--malla-text);
-    border: 1px solid var(--malla-hover);
-    border-radius: 3px;
-}
-
-.btn-logout {
-    background: var(--malla-primary);
-    color: var(--malla-hover);
-    border: 1px solid var(--malla-hover);
-    border-radius: 3px;
-}
-
-.btn-login-header:hover {
-    background-color: var(--malla-hover);
-    color: white !important;
-}
-
-.btn-logout:hover {
-    background-color: var(--malla-hover);
-    color: white !important;
+.user-icon[title]:hover::before {
+    content: '';
+    position: absolute;
+    bottom: -8px;
+    left: 50%;
+    transform: translateX(-50%);
+    border: 5px solid transparent;
+    border-bottom-color: #333;
+    z-index: 1000;
+    pointer-events: none;
 }
 
 /* Modal de Login */
@@ -551,8 +560,9 @@ body {
 }
 
 .calendario-tabla th.col-dia.hoy {
-    background: #ffc107;
-    color: #333;
+    background:var(--malla-red);
+    color: white;
+    font-weight: 600;
 }
 
 .calendario-tabla td {

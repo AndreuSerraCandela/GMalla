@@ -13,8 +13,13 @@ let estado = {
 document.addEventListener('DOMContentLoaded', () => {
     // Inicializar con la semana actual
     const hoy = new Date();
+    hoy.setHours(0, 0, 0, 0); // Normalizar a medianoche
     const lunes = new Date(hoy);
-    lunes.setDate(hoy.getDate() - hoy.getDay() + 1); // Lunes de esta semana
+    // Ajustar para obtener el lunes de esta semana (0 = domingo, 1 = lunes, etc.)
+    const diaSemana = hoy.getDay();
+    const diasHastaLunes = diaSemana === 0 ? -6 : 1 - diaSemana; // Si es domingo, retroceder 6 días
+    lunes.setDate(hoy.getDate() + diasHastaLunes);
+    lunes.setHours(0, 0, 0, 0); // Normalizar a medianoche
     estado.fechaInicioSemana = lunes;
     
     // Verificar estado de autenticación
@@ -23,9 +28,22 @@ document.addEventListener('DOMContentLoaded', () => {
     // Event listeners
     document.getElementById('refrescar-btn').addEventListener('click', cargarDatos);
     
-    // Login/Logout
-    document.getElementById('login-btn').addEventListener('click', mostrarLogin);
-    document.getElementById('logout-btn').addEventListener('click', cerrarSesion);
+    // Login/Logout - Toggle según estado
+    document.getElementById('login-icon').addEventListener('click', () => {
+        if (estado.autenticado) {
+            cerrarSesion();
+        } else {
+            mostrarLogin();
+        }
+    });
+    
+    document.getElementById('user-icon').addEventListener('click', () => {
+        if (estado.autenticado) {
+            cerrarSesion();
+        } else {
+            mostrarLogin();
+        }
+    });
     document.getElementById('login-form').addEventListener('submit', realizarLogin);
     
     // Cerrar modal
@@ -105,21 +123,22 @@ async function realizarLoginAutomatico(username, password) {
 
 // Actualizar UI de autenticación
 function actualizarUIAutenticacion() {
-    const loginBtn = document.getElementById('login-btn');
-    const userInfo = document.getElementById('user-info');
-    const userName = document.getElementById('user-name');
+    const loginIcon = document.getElementById('login-icon');
+    const userIcon = document.getElementById('user-icon');
     
     if (estado.autenticado && estado.usuarioActual) {
-        loginBtn.style.display = 'none';
-        userInfo.style.display = 'flex';
+        loginIcon.style.display = 'none';
+        userIcon.style.display = 'flex';
         const nombre = estado.usuarioActual.name || 
                      estado.usuarioActual.username || 
                      estado.usuarioActual.nombre || 
                      'Usuario';
-        userName.textContent = `👤 ${nombre}`;
+        userIcon.title = nombre;
+        userIcon.setAttribute('data-usuario', nombre);
     } else {
-        loginBtn.style.display = 'block';
-        userInfo.style.display = 'none';
+        loginIcon.style.display = 'flex';
+        userIcon.style.display = 'none';
+        loginIcon.title = 'Iniciar Sesión';
     }
 }
 
@@ -408,8 +427,10 @@ function generarCalendario() {
     for (let i = 0; i < 5; i++) {
         const fecha = new Date(estado.fechaInicioSemana);
         fecha.setDate(estado.fechaInicioSemana.getDate() + i);
+        fecha.setHours(0, 0, 0, 0); // Normalizar a medianoche
         
         const fechaStr = fecha.toISOString().split('T')[0];
+        // Comparar solo las fechas (sin horas)
         const esHoy = fecha.getTime() === hoy.getTime();
         
         const th = document.createElement('th');
@@ -469,11 +490,13 @@ function generarCalendario() {
             for (let i = 0; i < 5; i++) {
                 const fecha = new Date(estado.fechaInicioSemana);
                 fecha.setDate(estado.fechaInicioSemana.getDate() + i);
+                fecha.setHours(0, 0, 0, 0); // Normalizar a medianoche
                 const fechaStr = fecha.toISOString().split('T')[0];
                 
                 const td = document.createElement('td');
                 td.className = 'celda-dia';
                 
+                // Comparar solo las fechas (sin horas)
                 const esHoy = fecha.getTime() === hoy.getTime();
                 if (esHoy) {
                     td.classList.add('hoy');
@@ -1546,11 +1569,13 @@ document.addEventListener('DOMContentLoaded', () => {
 // Navegación de semanas
 function semanaAnterior() {
     estado.fechaInicioSemana.setDate(estado.fechaInicioSemana.getDate() - 7);
+    estado.fechaInicioSemana.setHours(0, 0, 0, 0); // Normalizar a medianoche
     generarCalendario();
 }
 
 function semanaSiguiente() {
     estado.fechaInicioSemana.setDate(estado.fechaInicioSemana.getDate() + 7);
+    estado.fechaInicioSemana.setHours(0, 0, 0, 0); // Normalizar a medianoche
     generarCalendario();
 }
 
@@ -1703,10 +1728,12 @@ function generarMiniCalendario() {
             const fecha = td.dataset.fecha;
             if (fecha) {
                 const fechaObj = new Date(fecha + 'T00:00:00');
+                fechaObj.setHours(0, 0, 0, 0); // Normalizar a medianoche
                 // Calcular el lunes de esa semana
                 const diaSemana = fechaObj.getDay();
                 const lunes = new Date(fechaObj);
                 lunes.setDate(fechaObj.getDate() - (diaSemana === 0 ? 6 : diaSemana - 1));
+                lunes.setHours(0, 0, 0, 0); // Normalizar a medianoche
                 estado.fechaInicioSemana = lunes;
                 generarCalendario();
                 generarMiniCalendario(); // Regenerar para actualizar el día seleccionado
