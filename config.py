@@ -27,6 +27,9 @@ GTASK_API_URL = os.getenv("GTASK_API_URL", "https://gtasks-api.deploy.malla.es")
 GTASK_USERNAME = os.getenv("GTASK_USERNAME", "andreuserra")
 GTASK_PASSWORD = os.getenv("GTASK_PASSWORD", "12345")
 
+# Configuración de LLM local
+LLM_BASE_URL = os.getenv("LLM_BASE_URL", "http://192.168.10.253:1234")
+
 # Configuración de base de datos (si se necesita almacenamiento local)
 DATABASE_URL = os.getenv("DATABASE_URL", f"sqlite:///{BASE_DIR / 'gmalla.db'}")
 

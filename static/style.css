@@ -793,6 +793,52 @@ header h1 {
     color: #333;
 }
 
+/* Botones de asignación automática */
+.btn-asignar-auto,
+.btn-reasignar-auto {
+    padding: 10px 20px;
+    border: 2px solid;
+    border-radius: 8px;
+    font-size: 14px;
+    cursor: pointer;
+    transition: all 0.3s;
+    font-weight: bold;
+    background: white;
+}
+
+.btn-asignar-auto {
+    border-color: #28a745;
+    color: #28a745;
+    background: #d4edda;
+}
+
+.btn-asignar-auto:hover:not(:disabled) {
+    background: #28a745;
+    color: white;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 8px rgba(40, 167, 69, 0.3);
+}
+
+.btn-reasignar-auto {
+    border-color: #ffc107;
+    color: #856404;
+    background: #fff3cd;
+}
+
+.btn-reasignar-auto:hover:not(:disabled) {
+    background: #ffc107;
+    color: #333;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 8px rgba(255, 193, 7, 0.3);
+}
+
+.btn-asignar-auto:disabled,
+.btn-reasignar-auto:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+    transform: none;
+}
+
 @media (max-width: 768px) {
     .calendario-tabla {
         font-size: 0.8em;

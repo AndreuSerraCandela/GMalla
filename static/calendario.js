@@ -45,6 +45,10 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('seleccionar-todos-btn').addEventListener('click', seleccionarTodosUsuarios);
     document.getElementById('deseleccionar-todos-btn').addEventListener('click', deseleccionarTodosUsuarios);
     
+    // Asignación automática
+    document.getElementById('asignar-automatico-btn').addEventListener('click', ejecutarAsignacionAutomatica);
+    document.getElementById('reasignar-automatico-btn').addEventListener('click', ejecutarReasignacionAutomatica);
+    
     // Cargar filtro guardado
     cargarFiltroUsuarios();
 });
@@ -1416,4 +1420,122 @@ function semanaAnterior() {
 function semanaSiguiente() {
     estado.fechaInicioSemana.setDate(estado.fechaInicioSemana.getDate() + 7);
     generarCalendario();
+}
+
+// Obtener rango de fechas visible en el calendario
+function obtenerRangoFechasVisible() {
+    const fechaInicio = new Date(estado.fechaInicioSemana);
+    fechaInicio.setHours(0, 0, 0, 0);
+    
+    const fechaFin = new Date(fechaInicio);
+    fechaFin.setDate(fechaInicio.getDate() + 6); // 7 días (semana completa)
+    fechaFin.setHours(23, 59, 59, 999);
+    
+    return {
+        fechaInicio: fechaInicio.toISOString().split('T')[0],
+        fechaFin: fechaFin.toISOString().split('T')[0]
+    };
+}
+
+// Ejecutar asignación automática (solo incidencias sin asignar)
+async function ejecutarAsignacionAutomatica() {
+    const rango = obtenerRangoFechasVisible();
+    const usuariosFiltrados = estado.usuariosFiltrados ? Array.from(estado.usuariosFiltrados) : null;
+    
+    // Confirmar acción
+    if (!confirm(`¿Desea asignar automáticamente las incidencias sin asignar para el rango de fechas ${rango.fechaInicio} a ${rango.fechaFin}?`)) {
+        return;
+    }
+    
+    const btn = document.getElementById('asignar-automatico-btn');
+    const textoOriginal = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = '⏳ Procesando...';
+    
+    try {
+        const response = await fetch('/api/asignacion-automatica', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                fecha_inicio: rango.fechaInicio,
+                fecha_fin: rango.fechaFin,
+                usuarios_filtrados: usuariosFiltrados,
+                aplicar_cambios: true,
+                solo_sin_asignar: true  // Solo asignar incidencias sin asignar
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            const asignadas = data.asignaciones_aplicadas?.length || 0;
+            const propuestas = data.asignaciones_propuestas?.length || 0;
+            alert(`✅ Asignación automática completada\n\n- ${propuestas} asignaciones propuestas\n- ${asignadas} asignaciones aplicadas${data.errores?.length > 0 ? `\n- ${data.errores.length} errores` : ''}`);
+            
+            // Recargar datos para mostrar los cambios
+            await cargarDatos();
+        } else {
+            alert(`❌ Error en asignación automática: ${data.error || 'Error desconocido'}`);
+        }
+    } catch (error) {
+        console.error('Error al ejecutar asignación automática:', error);
+        alert(`❌ Error de conexión: ${error.message}`);
+    } finally {
+        btn.disabled = false;
+        btn.textContent = textoOriginal;
+    }
+}
+
+// Ejecutar reasignación automática (incluye incidencias ya asignadas)
+async function ejecutarReasignacionAutomatica() {
+    const rango = obtenerRangoFechasVisible();
+    const usuariosFiltrados = estado.usuariosFiltrados ? Array.from(estado.usuariosFiltrados) : null;
+    
+    // Confirmar acción (más importante porque reasignará incidencias ya asignadas)
+    if (!confirm(`⚠️ ATENCIÓN: Esto reasignará TODAS las incidencias (incluidas las ya asignadas) para el rango de fechas ${rango.fechaInicio} a ${rango.fechaFin}.\n\n¿Desea continuar?`)) {
+        return;
+    }
+    
+    const btn = document.getElementById('reasignar-automatico-btn');
+    const textoOriginal = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = '⏳ Procesando...';
+    
+    try {
+        const response = await fetch('/api/asignacion-automatica', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                fecha_inicio: rango.fechaInicio,
+                fecha_fin: rango.fechaFin,
+                usuarios_filtrados: usuariosFiltrados,
+                aplicar_cambios: true,
+                solo_sin_asignar: false,  // Incluir incidencias ya asignadas
+                reasignar: true  // Indicar que es reasignación
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            const asignadas = data.asignaciones_aplicadas?.length || 0;
+            const propuestas = data.asignaciones_propuestas?.length || 0;
+            alert(`✅ Reasignación automática completada\n\n- ${propuestas} asignaciones propuestas\n- ${asignadas} asignaciones aplicadas${data.errores?.length > 0 ? `\n- ${data.errores.length} errores` : ''}`);
+            
+            // Recargar datos para mostrar los cambios
+            await cargarDatos();
+        } else {
+            alert(`❌ Error en reasignación automática: ${data.error || 'Error desconocido'}`);
+        }
+    } catch (error) {
+        console.error('Error al ejecutar reasignación automática:', error);
+        alert(`❌ Error de conexión: ${error.message}`);
+    } finally {
+        btn.disabled = false;
+        btn.textContent = textoOriginal;
+    }
 }

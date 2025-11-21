@@ -13,12 +13,15 @@ from business_central.client import BusinessCentralClient
 from calendario.gestor import GestorCalendario
 from models.incidencia import Incidencia, EstadoIncidencia
 from gtask.client import GTaskClient
+from llm.client import LLMClient
+from asignacion_automatica.asignador import AsignadorAutomatico
 from config import (
     BUSINESS_CENTRAL_BASE_URL, 
     BUSINESS_CENTRAL_API_KEY,
     GTASK_API_URL,
     GTASK_USERNAME,
-    GTASK_PASSWORD
+    GTASK_PASSWORD,
+    LLM_BASE_URL
 )
 
 app = Flask(__name__)
@@ -43,6 +46,17 @@ gtask_client = GTaskClient(api_url=GTASK_API_URL)
 
 # Inicializar gestor de calendario
 gestor = GestorCalendario(bc_client=bc_client)
+
+# Inicializar cliente LLM
+llm_client = LLMClient(base_url=LLM_BASE_URL)
+
+# Inicializar asignador automático
+asignador_automatico = AsignadorAutomatico(
+    bc_client=bc_client,
+    gtask_client=gtask_client,
+    llm_client=llm_client,
+    gestor=gestor
+)
 
 
 @app.route('/')
@@ -443,14 +457,124 @@ def obtener_detalle_incidencia(id_gtask):
         }), 500
 
 
+@app.route('/api/asignacion-automatica', methods=['POST'])
+def ejecutar_asignacion_automatica():
+    """API para ejecutar asignación automática de incidencias usando LLM"""
+    try:
+        data = request.json or {}
+        
+        # Obtener parámetros opcionales
+        usuarios_filtrados = data.get('usuarios_filtrados')  # Lista de IDs de usuarios
+        aplicar_cambios = data.get('aplicar_cambios', False)  # Si True, aplica cambios en BC
+        solo_sin_asignar = data.get('solo_sin_asignar', True)  # Si True, solo asigna incidencias sin asignar
+        reasignar = data.get('reasignar', False)  # Si True, reasigna todas las incidencias
+        fecha_inicio_str = data.get('fecha_inicio')  # Fecha inicio del rango
+        fecha_fin_str = data.get('fecha_fin')  # Fecha fin del rango
+        
+        # Obtener todas las incidencias
+        filtros = {}
+        if request.args.get('estado'):
+            filtros['estado'] = request.args.get('estado')
+        if request.args.get('recurso'):
+            filtros['recurso'] = request.args.get('recurso')
+        
+        incidencias = bc_client.obtener_incidencias(filtros=filtros if filtros else None)
+        
+        if not incidencias:
+            return jsonify({
+                'success': False,
+                'error': 'No se encontraron incidencias'
+            }), 404
+        
+        # Filtrar por rango de fechas si se proporciona
+        if fecha_inicio_str and fecha_fin_str:
+            try:
+                fecha_inicio = date.fromisoformat(fecha_inicio_str)
+                fecha_fin = date.fromisoformat(fecha_fin_str)
+                
+                # Filtrar incidencias que estén en el rango de fechas
+                incidencias_filtradas = []
+                for incidencia in incidencias:
+                    # Si la incidencia tiene fecha, verificar si está en el rango
+                    if incidencia.fecha:
+                        if fecha_inicio <= incidencia.fecha <= fecha_fin:
+                            incidencias_filtradas.append(incidencia)
+                    # Si no tiene fecha pero está en el rango solicitado, incluirla
+                    elif not incidencia.fecha:
+                        incidencias_filtradas.append(incidencia)
+                
+                incidencias = incidencias_filtradas
+                print(f"📅 Filtradas {len(incidencias)} incidencias en rango {fecha_inicio_str} a {fecha_fin_str}")
+            except ValueError as e:
+                return jsonify({
+                    'success': False,
+                    'error': f'Error al parsear fechas: {str(e)}'
+                }), 400
+        
+        if not incidencias:
+            return jsonify({
+                'success': False,
+                'error': 'No se encontraron incidencias en el rango de fechas especificado'
+            }), 404
+        
+        # Parsear fechas si se proporcionan
+        fecha_inicio = None
+        fecha_fin = None
+        if fecha_inicio_str and fecha_fin_str:
+            try:
+                fecha_inicio = date.fromisoformat(fecha_inicio_str)
+                fecha_fin = date.fromisoformat(fecha_fin_str)
+            except ValueError:
+                pass  # Si hay error, usar None
+        
+        # Ejecutar asignación automática
+        resultado = asignador_automatico.asignar_automaticamente(
+            incidencias=incidencias,
+            usuarios_filtrados=usuarios_filtrados,
+            aplicar_cambios=aplicar_cambios,
+            solo_sin_asignar=solo_sin_asignar,
+            reasignar=reasignar,
+            fecha_inicio=fecha_inicio,
+            fecha_fin=fecha_fin
+        )
+        
+        if resultado['success']:
+            return jsonify({
+                'success': True,
+                'asignaciones_propuestas': resultado.get('asignaciones_propuestas', []),
+                'asignaciones_aplicadas': resultado.get('asignaciones_aplicadas', []),
+                'errores': resultado.get('errores', []),
+                'message': f'Asignación automática completada. {len(resultado.get("asignaciones_propuestas", []))} asignaciones propuestas.'
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'error': resultado.get('error', 'Error desconocido'),
+                'traceback': resultado.get('traceback')
+            }), 500
+            
+    except Exception as e:
+        import traceback
+        error_trace = traceback.format_exc()
+        print(f"❌ Error al ejecutar asignación automática: {str(e)}")
+        print(f"📋 Traceback:\n{error_trace}")
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'traceback': error_trace
+        }), 500
+
+
 if __name__ == '__main__':
     print("=" * 60)
     print("GMalla - Aplicación Web")
     print("=" * 60)
     print(f"Business Central: {BUSINESS_CENTRAL_BASE_URL}")
     print(f"GTask API: {GTASK_API_URL}")
+    print(f"LLM Local: {LLM_BASE_URL}")
     print("\n🌐 Iniciando servidor web...")
-    print("📱 Abre tu navegador en: http://localhost:5000")
+    print("📱 Abre tu navegador en: http://localhost:5020")
+    print("🤖 Asignación automática disponible en: POST /api/asignacion-automatica")
     print("=" * 60)
     
     app.run(debug=True, host='127.0.0.1', port=5020)
