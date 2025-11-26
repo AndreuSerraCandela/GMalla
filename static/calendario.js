@@ -535,6 +535,10 @@ function crearElementoIncidencia(incidencia, usuarioId, fecha) {
 
 // Mover incidencia
 async function moverIncidencia(noIncidencia, usuarioOrigen, fechaOrigen, usuarioDestino, fechaDestino) {
+    // Mostrar overlay de carga
+    mostrarOverlayCarga();
+    actualizarMensajeOverlay('Moviendo incidencia...');
+    
     try {
         const response = await fetch('/api/mover-incidencia', {
             method: 'POST',
@@ -551,14 +555,28 @@ async function moverIncidencia(noIncidencia, usuarioOrigen, fechaOrigen, usuario
         const data = await response.json();
         
         if (data.success) {
-            // Refrescar datos
-            await cargarDatos();
+            // Actualizar mensaje del overlay
+            actualizarMensajeOverlay('Refrescando incidencias...');
+            
+            // Refrescar incidencias explícitamente
+            await cargarIncidencias();
+            
+            // Actualizar mensaje del overlay
+            actualizarMensajeOverlay('Actualizando calendario...');
+            
+            // Regenerar calendario para mostrar los cambios
+            generarCalendario();
+            
+            console.log(`✅ Incidencia ${noIncidencia} movida correctamente. Datos refrescados.`);
         } else {
             alert('Error al mover incidencia: ' + data.error);
         }
     } catch (error) {
         console.error('Error al mover incidencia:', error);
         alert('Error al mover la incidencia');
+    } finally {
+        // Ocultar overlay de carga
+        ocultarOverlayCarga();
     }
 }
 
@@ -810,6 +828,16 @@ function ocultarOverlayCarga() {
     const overlay = document.getElementById('loading-overlay');
     if (overlay) {
         overlay.classList.remove('active');
+    }
+}
+
+function actualizarMensajeOverlay(mensaje) {
+    const overlay = document.getElementById('loading-overlay');
+    if (overlay) {
+        const h3 = overlay.querySelector('h3');
+        if (h3) {
+            h3.textContent = mensaje;
+        }
     }
 }
 
