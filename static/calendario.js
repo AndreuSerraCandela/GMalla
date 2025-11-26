@@ -13,8 +13,13 @@ let estado = {
 document.addEventListener('DOMContentLoaded', () => {
     // Inicializar con la semana actual
     const hoy = new Date();
+    hoy.setHours(0, 0, 0, 0); // Normalizar a medianoche
     const lunes = new Date(hoy);
-    lunes.setDate(hoy.getDate() - hoy.getDay() + 1); // Lunes de esta semana
+    // Ajustar para obtener el lunes de esta semana (0 = domingo, 1 = lunes, etc.)
+    const diaSemana = hoy.getDay();
+    const diasHastaLunes = diaSemana === 0 ? -6 : 1 - diaSemana; // Si es domingo, retroceder 6 días
+    lunes.setDate(hoy.getDate() + diasHastaLunes);
+    lunes.setHours(0, 0, 0, 0); // Normalizar a medianoche
     estado.fechaInicioSemana = lunes;
     
     // Verificar estado de autenticación
@@ -22,12 +27,23 @@ document.addEventListener('DOMContentLoaded', () => {
     
     // Event listeners
     document.getElementById('refrescar-btn').addEventListener('click', cargarDatos);
-    document.getElementById('anterior-btn').addEventListener('click', semanaAnterior);
-    document.getElementById('siguiente-btn').addEventListener('click', semanaSiguiente);
     
-    // Login/Logout
-    document.getElementById('login-btn').addEventListener('click', mostrarLogin);
-    document.getElementById('logout-btn').addEventListener('click', cerrarSesion);
+    // Login/Logout - Toggle según estado
+    document.getElementById('login-icon').addEventListener('click', () => {
+        if (estado.autenticado) {
+            cerrarSesion();
+        } else {
+            mostrarLogin();
+        }
+    });
+    
+    document.getElementById('user-icon').addEventListener('click', () => {
+        if (estado.autenticado) {
+            cerrarSesion();
+        } else {
+            mostrarLogin();
+        }
+    });
     document.getElementById('login-form').addEventListener('submit', realizarLogin);
     
     // Cerrar modal
@@ -107,21 +123,22 @@ async function realizarLoginAutomatico(username, password) {
 
 // Actualizar UI de autenticación
 function actualizarUIAutenticacion() {
-    const loginBtn = document.getElementById('login-btn');
-    const userInfo = document.getElementById('user-info');
-    const userName = document.getElementById('user-name');
+    const loginIcon = document.getElementById('login-icon');
+    const userIcon = document.getElementById('user-icon');
     
     if (estado.autenticado && estado.usuarioActual) {
-        loginBtn.style.display = 'none';
-        userInfo.style.display = 'flex';
+        loginIcon.style.display = 'none';
+        userIcon.style.display = 'flex';
         const nombre = estado.usuarioActual.name || 
                      estado.usuarioActual.username || 
                      estado.usuarioActual.nombre || 
                      'Usuario';
-        userName.textContent = `👤 ${nombre}`;
+        userIcon.title = nombre;
+        userIcon.setAttribute('data-usuario', nombre);
     } else {
-        loginBtn.style.display = 'block';
-        userInfo.style.display = 'none';
+        loginIcon.style.display = 'flex';
+        userIcon.style.display = 'none';
+        loginIcon.title = 'Iniciar Sesión';
     }
 }
 
@@ -210,6 +227,10 @@ async function cargarDatos() {
     // Actualizar lista de filtro después de cargar usuarios
     actualizarListaFiltroUsuarios();
     
+    // Generar sidebar
+    generarMiniCalendario();
+    generarFiltrosTipos();
+    
     generarCalendario();
 }
 
@@ -297,6 +318,27 @@ async function cargarIncidencias() {
     }
 }
 
+// Función auxiliar para ajustar fecha de fin de semana a día laboral
+function ajustarFechaFinSemana(fechaStr) {
+    const fecha = new Date(fechaStr + 'T00:00:00');
+    const diaSemana = fecha.getDay(); // 0 = Domingo, 6 = Sábado
+    
+    // Si es sábado (6), mover a viernes (restar 1 día)
+    if (diaSemana === 6) {
+        fecha.setDate(fecha.getDate() - 1);
+        return fecha.toISOString().split('T')[0];
+    }
+    
+    // Si es domingo (0), mover a lunes (sumar 1 día)
+    if (diaSemana === 0) {
+        fecha.setDate(fecha.getDate() + 1);
+        return fecha.toISOString().split('T')[0];
+    }
+    
+    // Si es día laboral, devolver la fecha original
+    return fechaStr;
+}
+
 // Organizar incidencias por usuario y fecha
 function organizarIncidencias() {
     estado.asignaciones = {};
@@ -311,7 +353,24 @@ function organizarIncidencias() {
             }
             
             // Usar la fecha de la incidencia o la fecha actual si no tiene
-            const fecha = incidencia.fecha || new Date().toISOString().split('T')[0];
+            let fecha = incidencia.fecha || new Date().toISOString().split('T')[0];
+            const fechaOriginal = fecha; // Guardar fecha original antes de ajustar
+            
+            // Ajustar fecha si es fin de semana: sábado -> viernes, domingo -> lunes
+            const fechaAjustada = ajustarFechaFinSemana(fecha);
+            
+            // Si la fecha cambió, actualizar la incidencia y moverla en el backend
+            if (fechaAjustada !== fechaOriginal) {
+                console.log(`[INFO] Moviendo incidencia ${incidencia.no} de ${fechaOriginal} (fin de semana) a ${fechaAjustada}`);
+                fecha = fechaAjustada;
+                
+                // Actualizar la fecha de la incidencia localmente
+                incidencia.fecha = fechaAjustada;
+                
+                // Mover la incidencia en el backend de forma asíncrona (sin bloquear)
+                moverIncidenciaSilenciosa(incidencia.no, usuarioId, fechaOriginal, fechaAjustada);
+            }
+            
             if (!estado.asignaciones[usuarioId][fecha]) {
                 estado.asignaciones[usuarioId][fecha] = [];
             }
@@ -324,6 +383,32 @@ function organizarIncidencias() {
     console.log('📊 Incidencias organizadas:', Object.keys(estado.asignaciones).length, 'usuarios con asignaciones');
 }
 
+// Mover incidencia de forma silenciosa (sin mostrar alertas)
+async function moverIncidenciaSilenciosa(noIncidencia, usuarioId, fechaOriginal, fechaNueva) {
+    try {
+        const response = await fetch('/api/mover-incidencia', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                no: noIncidencia,
+                nueva_fecha: fechaNueva,
+                nuevo_usuario_id: usuarioId
+            })
+        });
+        
+        const data = await response.json();
+        if (data.success) {
+            console.log(`[OK] Incidencia ${noIncidencia} movida automáticamente de ${fechaOriginal} a ${fechaNueva}`);
+        } else {
+            console.warn(`[WARN] No se pudo mover automáticamente la incidencia ${noIncidencia}:`, data.error);
+        }
+    } catch (error) {
+        console.error('Error al mover incidencia automáticamente:', error);
+    }
+}
+
 // Generar calendario
 function generarCalendario() {
     const tabla = document.getElementById('calendario-tabla');
@@ -334,16 +419,18 @@ function generarCalendario() {
     thead.innerHTML = '<th class="col-usuario">Usuario</th>';
     tbody.innerHTML = '';
     
-    // Generar encabezados de días (7 días de la semana)
-    const diasSemana = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'];
+    // Generar encabezados de días (solo 5 días: lunes a viernes)
+    const diasSemana = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes'];
     const hoy = new Date();
     hoy.setHours(0, 0, 0, 0);
     
-    for (let i = 0; i < 7; i++) {
+    for (let i = 0; i < 5; i++) {
         const fecha = new Date(estado.fechaInicioSemana);
         fecha.setDate(estado.fechaInicioSemana.getDate() + i);
+        fecha.setHours(0, 0, 0, 0); // Normalizar a medianoche
         
         const fechaStr = fecha.toISOString().split('T')[0];
+        // Comparar solo las fechas (sin horas)
         const esHoy = fecha.getTime() === hoy.getTime();
         
         const th = document.createElement('th');
@@ -353,12 +440,12 @@ function generarCalendario() {
         thead.appendChild(th);
     }
     
-    // Actualizar título de la semana
+    // Actualizar título de la semana (lunes a viernes)
     const fechaFin = new Date(estado.fechaInicioSemana);
-    fechaFin.setDate(estado.fechaInicioSemana.getDate() + 6);
+    fechaFin.setDate(estado.fechaInicioSemana.getDate() + 4); // Viernes (4 días después del lunes)
     const meses = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
     document.getElementById('semana-actual').textContent = 
-        `Semana: ${estado.fechaInicioSemana.getDate()} ${meses[estado.fechaInicioSemana.getMonth()]} - ` +
+        `Semana Laboral: ${estado.fechaInicioSemana.getDate()} ${meses[estado.fechaInicioSemana.getMonth()]} - ` +
         `${fechaFin.getDate()} ${meses[fechaFin.getMonth()]} ${fechaFin.getFullYear()}`;
     
         // Obtener usuarios a mostrar (aplicar filtro si existe)
@@ -374,7 +461,7 @@ function generarCalendario() {
         if (usuariosAMostrar.length === 0) {
             const tr = document.createElement('tr');
             const td = document.createElement('td');
-            td.colSpan = 8;
+            td.colSpan = 6;
             td.textContent = estado.usuariosFiltrados !== null 
                 ? 'No hay usuarios seleccionados en el filtro. Usa el botón "Filtrar Usuarios" para seleccionar usuarios.'
                 : 'No hay usuarios disponibles. Haz clic en "Refrescar" para cargar datos.';
@@ -399,15 +486,17 @@ function generarCalendario() {
             tdUsuario.textContent = nombreUsuario;
             tr.appendChild(tdUsuario);
             
-            // Celdas de días
-            for (let i = 0; i < 7; i++) {
+            // Celdas de días (solo 5 días: lunes a viernes)
+            for (let i = 0; i < 5; i++) {
                 const fecha = new Date(estado.fechaInicioSemana);
                 fecha.setDate(estado.fechaInicioSemana.getDate() + i);
+                fecha.setHours(0, 0, 0, 0); // Normalizar a medianoche
                 const fechaStr = fecha.toISOString().split('T')[0];
                 
                 const td = document.createElement('td');
                 td.className = 'celda-dia';
                 
+                // Comparar solo las fechas (sin horas)
                 const esHoy = fecha.getTime() === hoy.getTime();
                 if (esHoy) {
                     td.classList.add('hoy');
@@ -423,8 +512,11 @@ function generarCalendario() {
             // Buscar incidencias para este usuario y fecha
             if (estado.asignaciones[usuarioIdNormalizado] && estado.asignaciones[usuarioIdNormalizado][fechaStr]) {
                 estado.asignaciones[usuarioIdNormalizado][fechaStr].forEach(incidencia => {
-                    const incDiv = crearElementoIncidencia(incidencia, usuarioIdNormalizado, fechaStr);
-                    td.appendChild(incDiv);
+                    // Verificar si el tipo de incidencia está filtrado
+                    if (debeMostrarIncidencia(incidencia)) {
+                        const incDiv = crearElementoIncidencia(incidencia, usuarioIdNormalizado, fechaStr);
+                        td.appendChild(incDiv);
+                    }
                 });
             }
             
@@ -439,8 +531,11 @@ function generarCalendario() {
                         if (incUsuarioId === usuarioIdNormalizado || 
                             incUsuarioId.includes(usuarioIdNormalizado) ||
                             usuarioIdNormalizado.includes(incUsuarioId)) {
-                            const incDiv = crearElementoIncidencia(incidencia, usuarioIdNormalizado, fechaStr);
-                            td.appendChild(incDiv);
+                            // Verificar si el tipo de incidencia está filtrado
+                            if (debeMostrarIncidencia(incidencia)) {
+                                const incDiv = crearElementoIncidencia(incidencia, usuarioIdNormalizado, fechaStr);
+                                td.appendChild(incDiv);
+                            }
                         }
                     });
                 }
@@ -476,10 +571,70 @@ function generarCalendario() {
     mostrarIncidenciasLibres();
 }
 
+// Función para verificar si una incidencia debe mostrarse según los filtros
+function debeMostrarIncidencia(incidencia) {
+    const checkboxes = document.querySelectorAll('.filtro-tipo-checkbox');
+    if (checkboxes.length === 0) return true; // Si no hay filtros, mostrar todas
+    
+    const tipoIncidencia = incidencia.tipo_incidencia || '';
+    let algunoSeleccionado = false;
+    let tipoSeleccionado = false;
+    
+    checkboxes.forEach(checkbox => {
+        if (checkbox.checked) {
+            algunoSeleccionado = true;
+            if (checkbox.value === tipoIncidencia) {
+                tipoSeleccionado = true;
+            }
+        }
+    });
+    
+    // Si no hay ningún tipo seleccionado, mostrar todas
+    if (!algunoSeleccionado) return true;
+    
+    // Si el tipo de la incidencia está seleccionado, mostrarla
+    return tipoSeleccionado;
+}
+
+// Función para obtener color según tipo de incidencia
+function obtenerColorPorTipo(tipoIncidencia) {
+    if (!tipoIncidencia) return 'tipo-default';
+    
+    // Normalizar el tipo de incidencia para comparación
+    const tipo = String(tipoIncidencia).toLowerCase().trim();
+    
+    // Mapeo de tipos de incidencia a clases CSS
+    const mapeoTipos = {
+        'incidencias emt': 'tipo-emt',
+        'emt': 'tipo-emt',
+        'mantenimiento': 'tipo-mantenimiento',
+        'reparación': 'tipo-reparacion',
+        'reparacion': 'tipo-reparacion',
+        'instalación': 'tipo-instalacion',
+        'instalacion': 'tipo-instalacion',
+        'revisión': 'tipo-revision',
+        'revision': 'tipo-revision',
+        'limpieza': 'tipo-limpieza',
+        'otras': 'tipo-otras',
+        'otra': 'tipo-otras'
+    };
+    
+    // Buscar coincidencia exacta o parcial
+    for (const [key, className] of Object.entries(mapeoTipos)) {
+        if (tipo.includes(key) || key.includes(tipo)) {
+            return className;
+        }
+    }
+    
+    return 'tipo-default';
+}
+
 // Crear elemento de incidencia
 function crearElementoIncidencia(incidencia, usuarioId, fecha) {
     const div = document.createElement('div');
-    div.className = `incidencia estado-${(incidencia.estado || 'abierta').toLowerCase().replace(' ', '')}`;
+    // Usar tipo de incidencia para el color en lugar del estado
+    const tipoClase = obtenerColorPorTipo(incidencia.tipo_incidencia);
+    div.className = `incidencia ${tipoClase}`;
     div.draggable = true;
     div.dataset.no = incidencia.no;
     div.dataset.usuario = usuarioId;
@@ -1442,21 +1597,23 @@ document.addEventListener('DOMContentLoaded', () => {
 // Navegación de semanas
 function semanaAnterior() {
     estado.fechaInicioSemana.setDate(estado.fechaInicioSemana.getDate() - 7);
+    estado.fechaInicioSemana.setHours(0, 0, 0, 0); // Normalizar a medianoche
     generarCalendario();
 }
 
 function semanaSiguiente() {
     estado.fechaInicioSemana.setDate(estado.fechaInicioSemana.getDate() + 7);
+    estado.fechaInicioSemana.setHours(0, 0, 0, 0); // Normalizar a medianoche
     generarCalendario();
 }
 
-// Obtener rango de fechas visible en el calendario
+// Obtener rango de fechas visible en el calendario (lunes a viernes)
 function obtenerRangoFechasVisible() {
     const fechaInicio = new Date(estado.fechaInicioSemana);
     fechaInicio.setHours(0, 0, 0, 0);
     
     const fechaFin = new Date(fechaInicio);
-    fechaFin.setDate(fechaInicio.getDate() + 6); // 7 días (semana completa)
+    fechaFin.setDate(fechaInicio.getDate() + 4); // 5 días (lunes a viernes)
     fechaFin.setHours(23, 59, 59, 999);
     
     return {
@@ -1514,6 +1671,157 @@ async function ejecutarAsignacionAutomatica() {
         btn.disabled = false;
         btn.textContent = textoOriginal;
     }
+}
+
+// Generar mini calendario en el sidebar
+function generarMiniCalendario() {
+    const container = document.getElementById('mini-calendario');
+    if (!container) return;
+    
+    const hoy = new Date();
+    const mes = hoy.getMonth();
+    const año = hoy.getFullYear();
+    
+    // Obtener primer día del mes y día de la semana
+    const primerDia = new Date(año, mes, 1);
+    const ultimoDia = new Date(año, mes + 1, 0);
+    const diasEnMes = ultimoDia.getDate();
+    const diaSemanaInicio = primerDia.getDay(); // 0 = Domingo
+    
+    // Ajustar para que lunes sea 0
+    const diaSemanaAjustado = (diaSemanaInicio + 6) % 7;
+    
+    const meses = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 
+                   'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
+    const diasSemana = ['L', 'M', 'X', 'J', 'V', 'S', 'D'];
+    
+    let html = `
+        <div class="mini-calendario-header">
+            <span>${meses[mes]} ${año}</span>
+        </div>
+        <table>
+            <thead>
+                <tr>
+                    ${diasSemana.map(dia => `<th>${dia}</th>`).join('')}
+                </tr>
+            </thead>
+            <tbody>
+    `;
+    
+    let dia = 1;
+    let fila = '';
+    
+    // Días del mes anterior (si es necesario)
+    if (diaSemanaAjustado > 0) {
+        const mesAnterior = new Date(año, mes, 0);
+        const diasMesAnterior = mesAnterior.getDate();
+        for (let i = diaSemanaAjustado - 1; i >= 0; i--) {
+            fila += `<td class="other-month">${diasMesAnterior - i}</td>`;
+        }
+    }
+    
+    // Días del mes actual
+    while (dia <= diasEnMes) {
+        if (fila && fila.split('</td>').length - 1 === 7) {
+            html += `<tr>${fila}</tr>`;
+            fila = '';
+        }
+        
+        const esHoy = dia === hoy.getDate() && mes === hoy.getMonth() && año === hoy.getFullYear();
+        const claseHoy = esHoy ? 'today' : '';
+        fila += `<td class="${claseHoy}" data-fecha="${año}-${String(mes + 1).padStart(2, '0')}-${String(dia).padStart(2, '0')}">${dia}</td>`;
+        dia++;
+    }
+    
+    // Completar última fila
+    while (fila && fila.split('</td>').length - 1 < 7) {
+        fila += `<td class="other-month">${dia - diasEnMes}</td>`;
+        dia++;
+    }
+    
+    if (fila) {
+        html += `<tr>${fila}</tr>`;
+    }
+    
+    html += `
+            </tbody>
+        </table>
+    `;
+    
+    container.innerHTML = html;
+    
+    // Agregar event listeners para los días
+    container.querySelectorAll('td[data-fecha]').forEach(td => {
+        td.addEventListener('click', () => {
+            const fecha = td.dataset.fecha;
+            if (fecha) {
+                const fechaObj = new Date(fecha + 'T00:00:00');
+                fechaObj.setHours(0, 0, 0, 0); // Normalizar a medianoche
+                // Calcular el lunes de esa semana
+                const diaSemana = fechaObj.getDay();
+                const lunes = new Date(fechaObj);
+                lunes.setDate(fechaObj.getDate() - (diaSemana === 0 ? 6 : diaSemana - 1));
+                lunes.setHours(0, 0, 0, 0); // Normalizar a medianoche
+                estado.fechaInicioSemana = lunes;
+                generarCalendario();
+                generarMiniCalendario(); // Regenerar para actualizar el día seleccionado
+            }
+        });
+    });
+}
+
+// Generar filtros de tipos de incidencias
+function generarFiltrosTipos() {
+    const container = document.getElementById('tipos-incidencias-filtro');
+    if (!container) return;
+    
+    // Obtener tipos únicos de incidencias
+    const tiposUnicos = new Set();
+    estado.incidencias.forEach(inc => {
+        if (inc.tipo_incidencia) {
+            tiposUnicos.add(inc.tipo_incidencia);
+        }
+    });
+    
+    if (tiposUnicos.size === 0) {
+        container.innerHTML = '<p style="color: #999; font-size: 0.85rem;">No hay tipos de incidencias</p>';
+        return;
+    }
+    
+    let html = '';
+    tiposUnicos.forEach(tipo => {
+        const tipoClase = obtenerColorPorTipo(tipo);
+        
+        // Crear elemento temporal para obtener el color
+        const tempDiv = document.createElement('div');
+        tempDiv.className = `incidencia ${tipoClase}`;
+        tempDiv.style.position = 'absolute';
+        tempDiv.style.visibility = 'hidden';
+        document.body.appendChild(tempDiv);
+        const estilo = window.getComputedStyle(tempDiv);
+        const bgColor = estilo.backgroundColor;
+        document.body.removeChild(tempDiv);
+        
+        html += `
+            <div class="tipo-filtro-item">
+                <input type="checkbox" id="filtro-tipo-${tipo.replace(/\s+/g, '-').replace(/[^a-z0-9-]/gi, '')}" 
+                       value="${tipo}" checked class="filtro-tipo-checkbox">
+                <div class="tipo-filtro-color" style="background-color: ${bgColor}"></div>
+                <label for="filtro-tipo-${tipo.replace(/\s+/g, '-').replace(/[^a-z0-9-]/gi, '')}" style="cursor: pointer; font-size: 0.85rem;">
+                    ${tipo}
+                </label>
+            </div>
+        `;
+    });
+    
+    container.innerHTML = html;
+    
+    // Agregar event listeners
+    container.querySelectorAll('.filtro-tipo-checkbox').forEach(checkbox => {
+        checkbox.addEventListener('change', () => {
+            generarCalendario();
+        });
+    });
 }
 
 // Ejecutar reasignación automática (incluye incidencias ya asignadas)
