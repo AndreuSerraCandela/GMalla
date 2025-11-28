@@ -11,15 +11,17 @@ let estado = {
 
 // Inicialización
 document.addEventListener('DOMContentLoaded', () => {
-    // Inicializar con la semana actual
+    // Inicializar con la semana actual usando UTC
     const hoy = new Date();
-    hoy.setHours(0, 0, 0, 0); // Normalizar a medianoche
-    const lunes = new Date(hoy);
+    const año = hoy.getUTCFullYear();
+    const mes = hoy.getUTCMonth();
+    const dia = hoy.getUTCDate();
+    const hoyUTC = new Date(Date.UTC(año, mes, dia));
+    
     // Ajustar para obtener el lunes de esta semana (0 = domingo, 1 = lunes, etc.)
-    const diaSemana = hoy.getDay();
+    const diaSemana = hoyUTC.getUTCDay();
     const diasHastaLunes = diaSemana === 0 ? -6 : 1 - diaSemana; // Si es domingo, retroceder 6 días
-    lunes.setDate(hoy.getDate() + diasHastaLunes);
-    lunes.setHours(0, 0, 0, 0); // Normalizar a medianoche
+    const lunes = new Date(Date.UTC(año, mes, dia + diasHastaLunes));
     estado.fechaInicioSemana = lunes;
     
     // Verificar estado de autenticación
@@ -320,18 +322,28 @@ async function cargarIncidencias() {
 
 // Función auxiliar para ajustar fecha de fin de semana a día laboral
 function ajustarFechaFinSemana(fechaStr) {
-    const fecha = new Date(fechaStr + 'T00:00:00');
-    const diaSemana = fecha.getDay(); // 0 = Domingo, 6 = Sábado
+    // Parsear la fecha manualmente para evitar problemas de zona horaria
+    // Formato esperado: YYYY-MM-DD
+    const partes = fechaStr.split('-');
+    if (partes.length !== 3) return fechaStr;
+    
+    const año = parseInt(partes[0], 10);
+    const mes = parseInt(partes[1], 10) - 1; // Los meses en Date son 0-indexados
+    const dia = parseInt(partes[2], 10);
+    
+    // Crear fecha en UTC para evitar problemas de zona horaria
+    const fecha = new Date(Date.UTC(año, mes, dia));
+    const diaSemana = fecha.getUTCDay(); // 0 = Domingo, 6 = Sábado
     
     // Si es sábado (6), mover a viernes (restar 1 día)
     if (diaSemana === 6) {
-        fecha.setDate(fecha.getDate() - 1);
+        fecha.setUTCDate(fecha.getUTCDate() - 1);
         return fecha.toISOString().split('T')[0];
     }
     
     // Si es domingo (0), mover a lunes (sumar 1 día)
     if (diaSemana === 0) {
-        fecha.setDate(fecha.getDate() + 1);
+        fecha.setUTCDate(fecha.getUTCDate() + 1);
         return fecha.toISOString().split('T')[0];
     }
     
@@ -422,31 +434,38 @@ function generarCalendario() {
     // Generar encabezados de días (solo 5 días: lunes a viernes)
     const diasSemana = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes'];
     const hoy = new Date();
-    hoy.setHours(0, 0, 0, 0);
+    hoy.setUTCHours(0, 0, 0, 0);
+    const hoyStr = hoy.toISOString().split('T')[0];
     
     for (let i = 0; i < 5; i++) {
-        const fecha = new Date(estado.fechaInicioSemana);
-        fecha.setDate(estado.fechaInicioSemana.getDate() + i);
-        fecha.setHours(0, 0, 0, 0); // Normalizar a medianoche
+        // Obtener fecha en UTC para evitar problemas de zona horaria
+        const fechaInicio = estado.fechaInicioSemana;
+        const año = fechaInicio.getUTCFullYear();
+        const mes = fechaInicio.getUTCMonth();
+        const dia = fechaInicio.getUTCDate();
+        const fecha = new Date(Date.UTC(año, mes, dia + i));
         
         const fechaStr = fecha.toISOString().split('T')[0];
         // Comparar solo las fechas (sin horas)
-        const esHoy = fecha.getTime() === hoy.getTime();
+        const esHoy = fechaStr === hoyStr;
         
         const th = document.createElement('th');
         th.className = `col-dia ${esHoy ? 'hoy' : ''}`;
-        th.textContent = `${diasSemana[i]} ${fecha.getDate()}/${fecha.getMonth() + 1}`;
+        th.textContent = `${diasSemana[i]} ${fecha.getUTCDate()}/${fecha.getUTCMonth() + 1}`;
         th.dataset.fecha = fechaStr;
         thead.appendChild(th);
     }
     
     // Actualizar título de la semana (lunes a viernes)
-    const fechaFin = new Date(estado.fechaInicioSemana);
-    fechaFin.setDate(estado.fechaInicioSemana.getDate() + 4); // Viernes (4 días después del lunes)
+    const fechaInicio = estado.fechaInicioSemana;
+    const añoInicio = fechaInicio.getUTCFullYear();
+    const mesInicio = fechaInicio.getUTCMonth();
+    const diaInicio = fechaInicio.getUTCDate();
+    const fechaFin = new Date(Date.UTC(añoInicio, mesInicio, diaInicio + 4)); // Viernes (4 días después del lunes)
     const meses = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
     document.getElementById('semana-actual').textContent = 
-        `Semana Laboral: ${estado.fechaInicioSemana.getDate()} ${meses[estado.fechaInicioSemana.getMonth()]} - ` +
-        `${fechaFin.getDate()} ${meses[fechaFin.getMonth()]} ${fechaFin.getFullYear()}`;
+        `Semana Laboral: ${fechaInicio.getUTCDate()} ${meses[fechaInicio.getUTCMonth()]} - ` +
+        `${fechaFin.getUTCDate()} ${meses[fechaFin.getUTCMonth()]} ${fechaFin.getUTCFullYear()}`;
     
         // Obtener usuarios a mostrar (aplicar filtro si existe)
         let usuariosAMostrar = estado.usuarios;
@@ -488,16 +507,20 @@ function generarCalendario() {
             
             // Celdas de días (solo 5 días: lunes a viernes)
             for (let i = 0; i < 5; i++) {
-                const fecha = new Date(estado.fechaInicioSemana);
-                fecha.setDate(estado.fechaInicioSemana.getDate() + i);
-                fecha.setHours(0, 0, 0, 0); // Normalizar a medianoche
+                // Obtener fecha en UTC para evitar problemas de zona horaria
+                const fechaInicio = estado.fechaInicioSemana;
+                const año = fechaInicio.getUTCFullYear();
+                const mes = fechaInicio.getUTCMonth();
+                const dia = fechaInicio.getUTCDate();
+                const fecha = new Date(Date.UTC(año, mes, dia + i));
+                
                 const fechaStr = fecha.toISOString().split('T')[0];
                 
                 const td = document.createElement('td');
                 td.className = 'celda-dia';
                 
                 // Comparar solo las fechas (sin horas)
-                const esHoy = fecha.getTime() === hoy.getTime();
+                const esHoy = fechaStr === hoyStr;
                 if (esHoy) {
                     td.classList.add('hoy');
                 }
@@ -1217,21 +1240,6 @@ async function generarPDF(detalle, idGtask) {
         doc.setFont('helvetica', 'normal');
         const lineHeight = 7;
         
-        // Descripción (con ancho limitado para no superponerse con el QR)
-        doc.setFont('helvetica', 'bold');
-        doc.text('Descripción:', margin, yPos);
-        yPos += lineHeight;
-        doc.setFont('helvetica', 'normal');
-        // Limpiar HTML de la descripción
-        let descripcion = detalle.description || 'Sin descripción';
-        // Crear un elemento temporal para extraer solo el texto
-        const tempDiv = document.createElement('div');
-        tempDiv.innerHTML = descripcion;
-        descripcion = tempDiv.textContent || tempDiv.innerText || descripcion;
-        const descripcionLines = doc.splitTextToSize(descripcion, contentWidth);
-        doc.text(descripcionLines, margin, yPos);
-        yPos += descripcionLines.length * lineHeight + 3;
-        
         // Estado y Fecha en la misma línea
         const mitadAncho = contentWidth / 2;
         doc.setFont('helvetica', 'bold');
@@ -1255,21 +1263,21 @@ async function generarPDF(detalle, idGtask) {
         doc.text(fechaTexto, margin + mitadAncho + 20, yPos);
         yPos += lineHeight + 3;
         
-        // Tipo de Incidencia
+        // Tipo de Incidencia y Usuario en la misma línea
         doc.setFont('helvetica', 'bold');
         doc.text('Tipo de Incidencia:', margin, yPos);
-        yPos += lineHeight;
         doc.setFont('helvetica', 'normal');
-        doc.text(detalle.incidenceType || 'N/A', margin, yPos);
-        yPos += lineHeight + 3;
-        
-        // Elemento y Usuario en la misma línea
-        doc.setFont('helvetica', 'bold');
-        doc.text('Elemento:', margin, yPos);
-        doc.setFont('helvetica', 'normal');
-        doc.text(detalle.resource || 'N/A', margin , yPos+lineHeight-3);
+        doc.text(detalle.incidenceType || 'N/A', margin + 45, yPos);
         
         // Usuario a la derecha
+        
+        yPos += lineHeight + 3;
+        
+        // Descripción debajo del Tipo de Incidencia (con ancho limitado para no superponerse con el QR)
+        doc.setFont('helvetica', 'bold');
+        doc.text('Descripción:', margin, yPos);
+        
+        doc.setFont('helvetica', 'normal');
         doc.setFont('helvetica', 'bold');
         doc.text('Usuario:', margin + mitadAncho, yPos);
         doc.setFont('helvetica', 'normal');
@@ -1277,16 +1285,17 @@ async function generarPDF(detalle, idGtask) {
         const nombreUsuario = obtenerNombreUsuario(userId);
         doc.text(nombreUsuario, margin + mitadAncho + 20, yPos);
         yPos += lineHeight;
-        if (detalle.resource_name) {
-            doc.setFont('helvetica', 'italic');
-            doc.setFontSize(10);
-            doc.text(detalle.resource_name, margin + 10, yPos);
-            doc.setFontSize(12);
-            doc.setFont('helvetica', 'normal');
-            yPos += lineHeight;
-        }
+        // Limpiar HTML de la descripción
+        let descripcion = detalle.description || 'Sin descripción';
+        // Crear un elemento temporal para extraer solo el texto
+        const tempDiv = document.createElement('div');
+        tempDiv.innerHTML = descripcion;
+        descripcion = tempDiv.textContent || tempDiv.innerText || descripcion;
+        const descripcionLines = doc.splitTextToSize(descripcion, contentWidth);
+        doc.text(descripcionLines, margin, yPos);
+        yPos += descripcionLines.length * lineHeight + 3;
         
-        // QR de ubicación debajo del Elemento (si hay coordenadas)
+        // Preparar QR de ubicación antes de mostrar Elemento (si hay coordenadas)
         if (detalle.puntoX && detalle.puntoY) {
             const lng = parseFloat(detalle.puntoX); // Longitud
             const lat = parseFloat(detalle.puntoY); // Latitud
@@ -1319,75 +1328,111 @@ async function generarPDF(detalle, idGtask) {
                 
                 // Limpiar el div temporal
                 document.body.removeChild(qrMapsDiv);
-                
-                // Añadir título "Ubicación"
-                doc.setFont('helvetica', 'bold');
-                doc.setFontSize(10);
-                doc.text('Ubicación:', margin, yPos);
-                yPos += lineHeight - 2;
-                
-                // Añadir el QR pequeño
-                if (qrMapsDataUrl) {
-                    doc.addImage(qrMapsDataUrl, 'PNG', margin, yPos, qrMapsSize, qrMapsSize);
-                    yPos += qrMapsSize + 3;
-                }
-                
-                doc.setFontSize(12);
             }
+        }
+        
+        // Elemento y Ubicación (QR) en la misma línea
+        doc.setFont('helvetica', 'bold');
+        doc.text('Elemento:', margin, yPos);
+        doc.setFont('helvetica', 'normal');
+        doc.text(detalle.resource || 'N/A', margin + 25, yPos);
+        
+        // Ubicación (QR) a la derecha
+        if (qrMapsDataUrl) {
+            doc.setFont('helvetica', 'bold');
+            doc.setFontSize(10);
+            doc.text('Ubicación:', margin + mitadAncho, yPos);
+            doc.setFontSize(12);
+            // Añadir el QR pequeño a la derecha
+            doc.addImage(qrMapsDataUrl, 'PNG', margin + mitadAncho + 25, yPos - 3, qrMapsSize, qrMapsSize);
+        }
+        yPos += lineHeight;
+        
+        if (detalle.resource_name) {
+            doc.setFont('helvetica', 'italic');
+            doc.setFontSize(10);
+            doc.text(detalle.resource_name, margin + 10, yPos);
+            doc.setFontSize(12);
+            doc.setFont('helvetica', 'normal');
+            yPos += lineHeight;
         }
         yPos += 3;
         
         // La geolocalización ya se añadió debajo del Elemento con el QR
         
-        // Imágenes (usar ancho completo de página ya que el QR no interfiere aquí)
+        // Imágenes (sin título, directamente las imágenes)
         if (detalle.image && Array.isArray(detalle.image) && detalle.image.length > 0) {
-            doc.setFont('helvetica', 'bold');
-            doc.text('Imágenes:', margin, yPos);
-            yPos += lineHeight + 3;
+            // No añadir título "Imágenes:", ir directamente a las imágenes
             
             // Para las imágenes, usar el ancho completo de la página menos márgenes
             const fullContentWidth = pageWidth - (margin * 2);
-            const imagesPerRow = 2;
-            const imageWidth = (fullContentWidth - 10) / imagesPerRow;
-            const imageHeight = imageWidth * 0.75; // Aspect ratio 4:3
-            let currentX = margin;
-            let imagesInRow = 0;
+            const maxImageHeight = pageHeight - margin - yPos - 20; // Altura máxima disponible
+            const spacing = 10; // Espacio entre imágenes
             
             for (let i = 0; i < detalle.image.length; i++) {
                 const img = detalle.image[i];
                 if (img.url) {
                     try {
-                        // Cargar imagen desde URL
-                        const imgData = await loadImageAsDataUrl(img.url);
-                        if (imgData) {
+                        // Cargar imagen desde URL con sus dimensiones
+                        const imgInfo = await loadImageWithDimensions(img.url);
+                        if (imgInfo && imgInfo.dataUrl) {
+                            const imgWidth = imgInfo.width;
+                            const imgHeight = imgInfo.height;
+                            // Usar la orientación EXIF si está disponible, sino usar dimensiones
+                            const isLandscape = imgInfo.isLandscape !== undefined 
+                                ? imgInfo.isLandscape 
+                                : imgWidth > imgHeight;
+                            
+                            // Calcular dimensiones de impresión - todas las imágenes una por fila
+                            let printWidth, printHeight;
+                            
+                            if (isLandscape) {
+                                // Imagen horizontal: usar ancho completo o casi completo
+                                printWidth = fullContentWidth;
+                                printHeight = (printWidth * imgHeight) / imgWidth;
+                                
+                                // Si es muy alta, limitar altura y ajustar ancho
+                                if (printHeight > maxImageHeight) {
+                                    printHeight = maxImageHeight;
+                                    printWidth = (printHeight * imgWidth) / imgHeight;
+                                }
+                            } else {
+                                // Imagen vertical: usar ancho razonable (no todo el ancho)
+                                printWidth = fullContentWidth * 0.5; // Mitad del ancho disponible
+                                printHeight = (printWidth * imgHeight) / imgWidth;
+                                
+                                // Si es muy alta, limitar altura
+                                if (printHeight > maxImageHeight) {
+                                    printHeight = maxImageHeight;
+                                    printWidth = (printHeight * imgWidth) / imgHeight;
+                                }
+                            }
+                            
                             // Verificar si hay espacio en la página
-                            if (yPos + imageHeight > pageHeight - margin) {
+                            if (yPos + printHeight > pageHeight - margin) {
                                 doc.addPage();
                                 yPos = margin;
-                                currentX = margin;
-                                imagesInRow = 0;
                             }
                             
-                            doc.addImage(imgData, 'JPEG', currentX, yPos, imageWidth, imageHeight);
-                            
-                            imagesInRow++;
-                            if (imagesInRow >= imagesPerRow) {
-                                yPos += imageHeight + 10; // Altura de imagen + espacio
-                                currentX = margin;
-                                imagesInRow = 0;
-                            } else {
-                                currentX += imageWidth + 10;
+                            // Centrar imagen si es vertical (más pequeña)
+                            let xPos = margin;
+                            if (!isLandscape && printWidth < fullContentWidth * 0.8) {
+                                // Centrar imágenes verticales
+                                const remainingWidth = fullContentWidth - printWidth;
+                                if (remainingWidth > 0) {
+                                    xPos = margin + (remainingWidth / 2);
+                                }
                             }
+                            
+                            doc.addImage(imgInfo.dataUrl, 'JPEG', xPos, yPos, printWidth, printHeight);
+                            
+                            // Avanzar posición Y para la siguiente imagen
+                            yPos += printHeight + spacing;
                         }
                     } catch (error) {
                         console.error(`Error cargando imagen ${img.url}:`, error);
                     }
                 }
-            }
-            
-            // Si quedaron imágenes en la fila, avanzar yPos
-            if (imagesInRow > 0) {
-                yPos += imageHeight + 15;
             }
         }
         
@@ -1426,6 +1471,307 @@ function loadImageAsDataUrl(url) {
         };
         
         img.src = url;
+    });
+}
+
+// Obtener orientación EXIF de un blob
+function getImageOrientation(blob) {
+    return new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            try {
+                const view = new DataView(e.target.result);
+                if (view.getUint16(0, false) !== 0xFFD8) {
+                    resolve(1); // No es JPEG
+                    return;
+                }
+                const length = view.byteLength;
+                let offset = 2;
+                
+                while (offset < length - 1) {
+                    const marker = view.getUint16(offset, false);
+                    offset += 2;
+                    
+                    if (marker === 0xFFE1) {
+                        // APP1 segment - puede contener EXIF
+                        const segmentLength = view.getUint16(offset, false);
+                        offset += 2;
+                        
+                        // Verificar si es EXIF
+                        if (offset + 4 < length && 
+                            view.getUint32(offset, false) === 0x45786966) { // "Exif"
+                            offset += 6; // Saltar "Exif\0\0"
+                            
+                            // Byte order
+                            const little = view.getUint16(offset, false) === 0x4949;
+                            offset += 2;
+                            
+                            // Verificar TIFF header
+                            if (view.getUint16(offset, little) === 0x002A) {
+                                offset += 2;
+                                const ifdOffset = view.getUint32(offset, little);
+                                offset = 2 + 2 + segmentLength - 2 - 2 + ifdOffset;
+                                
+                                if (offset < length) {
+                                    const tags = view.getUint16(offset, little);
+                                    offset += 2;
+                                    
+                                    for (let i = 0; i < tags && offset + 12 < length; i++) {
+                                        const tagOffset = offset + (i * 12);
+                                        if (view.getUint16(tagOffset, little) === 0x0112) {
+                                            const orientation = view.getUint16(tagOffset + 8, little);
+                                            resolve(orientation);
+                                            return;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        offset += segmentLength - 2 - 6;
+                    } else if (marker >= 0xFFE0 && marker <= 0xFFEF) {
+                        // Otro segmento APP
+                        const segmentLength = view.getUint16(offset, false);
+                        offset += segmentLength;
+                    } else if (marker >= 0xFFC0 && marker <= 0xFFC3) {
+                        // SOF marker - ya pasamos los segmentos APP, salir
+                        break;
+                    } else {
+                        // Otro marker, intentar avanzar
+                        if (offset < length) {
+                            const segmentLength = view.getUint16(offset, false);
+                            if (segmentLength > 0 && segmentLength < 0xFF00) {
+                                offset += segmentLength;
+                            } else {
+                                break;
+                            }
+                        } else {
+                            break;
+                        }
+                    }
+                }
+                resolve(1); // Por defecto, orientación normal
+            } catch (error) {
+                console.warn('[EXIF] Error parseando EXIF:', error);
+                resolve(1); // Si hay error, asumir orientación normal
+            }
+        };
+        reader.onerror = () => {
+            console.warn('[EXIF] Error leyendo blob');
+            resolve(1);
+        };
+        reader.readAsArrayBuffer(blob);
+    });
+}
+
+// Cargar imagen desde URL con sus dimensiones y orientación corregida
+function loadImageWithDimensions(url) {
+    return new Promise((resolve, reject) => {
+        // Primero cargar la imagen como blob para leer EXIF
+        fetch(url)
+            .then(response => response.blob())
+            .then(blob => {
+                const img = new Image();
+                img.crossOrigin = 'anonymous';
+                
+                img.onload = () => {
+                    try {
+                        // Leer orientación EXIF
+                        getImageOrientation(blob).then(orientation => {
+                            const canvas = document.createElement('canvas');
+                            const ctx = canvas.getContext('2d');
+                            
+                            // Dimensiones que el navegador nos da
+                            // NOTA: El navegador moderno puede haber aplicado ya la rotación EXIF automáticamente
+                            let displayWidth = img.width;
+                            let displayHeight = img.height;
+                            
+                            console.log(`[EXIF] Orientación EXIF: ${orientation}, Dimensiones display: ${displayWidth}x${displayHeight}`);
+                            
+                            // Determinar dimensiones finales y si necesitamos rotar
+                            let finalWidth, finalHeight, needsRotation = false;
+                            const aspectRatio = displayWidth / displayHeight;
+                            const isVeryVertical = aspectRatio < 0.7; // Muy vertical (ancho mucho menor que alto)
+                            
+                            if (orientation === 6) {
+                                // 90° horario: el archivo está vertical pero debe mostrarse horizontal
+                                // Si el navegador NO aplicó la rotación: displayHeight > displayWidth
+                                // Si el navegador SÍ aplicó la rotación: displayWidth > displayHeight
+                                if (displayHeight > displayWidth) {
+                                    // Navegador NO rotó: necesitamos rotar nosotros
+                                    finalWidth = displayHeight;
+                                    finalHeight = displayWidth;
+                                    needsRotation = true;
+                                } else {
+                                    // Navegador ya rotó: usar dimensiones tal cual
+                                    finalWidth = displayWidth;
+                                    finalHeight = displayHeight;
+                                }
+                            } else if (orientation === 8) {
+                                // 270° horario: similar pero rotación inversa
+                                if (displayHeight > displayWidth) {
+                                    finalWidth = displayHeight;
+                                    finalHeight = displayWidth;
+                                    needsRotation = true;
+                                } else {
+                                    finalWidth = displayWidth;
+                                    finalHeight = displayHeight;
+                                }
+                            } else if (orientation === 3) {
+                                // 180°: rotar pero mantener dimensiones
+                                finalWidth = displayWidth;
+                                finalHeight = displayHeight;
+                                needsRotation = true;
+                            } else if (orientation === 1 && isVeryVertical && displayHeight > 1000) {
+                                // Heurística: si EXIF dice 1 (normal) pero la imagen es muy vertical
+                                // y tiene buen tamaño, probablemente es una foto de móvil tomada horizontal
+                                // que necesita rotación. Esto es común cuando los metadatos EXIF se pierden.
+                                console.log(`[EXIF] Heurística: imagen muy vertical (${aspectRatio.toFixed(2)}) con EXIF=1, rotando 270°`);
+                                finalWidth = displayHeight;
+                                finalHeight = displayWidth;
+                                needsRotation = true;
+                                // Usar orientación 8 para rotar 270° (o -90°)
+                                orientation = 8;
+                            } else {
+                                // Sin rotación
+                                finalWidth = displayWidth;
+                                finalHeight = displayHeight;
+                            }
+                            
+                            canvas.width = finalWidth;
+                            canvas.height = finalHeight;
+                            
+                            // Aplicar rotación si es necesaria
+                            if (needsRotation) {
+                                ctx.save();
+                                switch (orientation) {
+                                    case 3: // 180°
+                                        ctx.translate(canvas.width, canvas.height);
+                                        ctx.rotate(Math.PI);
+                                        ctx.drawImage(img, 0, 0, displayWidth, displayHeight);
+                                        break;
+                                    case 6: // 90° horario
+                                        ctx.translate(canvas.width, 0);
+                                        ctx.rotate(Math.PI / 2);
+                                        ctx.drawImage(img, 0, 0, displayWidth, displayHeight);
+                                        break;
+                                    case 8: // 270° horario
+                                        ctx.translate(0, canvas.height);
+                                        ctx.rotate(-Math.PI / 2);
+                                        ctx.drawImage(img, 0, 0, displayWidth, displayHeight);
+                                        break;
+                                }
+                                ctx.restore();
+                            } else {
+                                ctx.drawImage(img, 0, 0, displayWidth, displayHeight);
+                            }
+                            
+                            const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
+                            console.log(`[EXIF] Imagen final: ${canvas.width}x${canvas.height}, rotada: ${needsRotation}, orientación EXIF: ${orientation}`);
+                            
+                            // Determinar si la imagen original era horizontal o vertical basándose en EXIF
+                            // Si orientación es 6 u 8, la imagen fue tomada en horizontal (aunque esté guardada como vertical)
+                            // Si orientación es 1, 3, o sin rotación, usar las dimensiones finales después de rotar
+                            let isOriginalLandscape;
+                            if (orientation === 6 || orientation === 8) {
+                                // Orientación 6 u 8 significa que fue tomada horizontalmente
+                                // Después de rotar, las dimensiones finales serán width > height
+                                isOriginalLandscape = true;
+                            } else if (orientation === 3) {
+                                // 180° - la relación de aspecto se mantiene, usar dimensiones finales
+                                isOriginalLandscape = canvas.width > canvas.height;
+                            } else {
+                                // Sin rotación o rotación desconocida - usar dimensiones finales
+                                isOriginalLandscape = canvas.width > canvas.height;
+                            }
+                            
+                            resolve({
+                                dataUrl: dataUrl,
+                                width: canvas.width,
+                                height: canvas.height,
+                                orientation: orientation,
+                                isLandscape: isOriginalLandscape
+                            });
+                        }).catch(error => {
+                            console.warn('[EXIF] Error leyendo EXIF, intentando heurística:', error);
+                            // Fallback: si la imagen es muy vertical (height >> width) y grande,
+                            // podría ser una foto horizontal que necesita rotación
+                            const aspectRatio = img.width / img.height;
+                            const canvas = document.createElement('canvas');
+                            const ctx = canvas.getContext('2d');
+                            
+                            // Heurística: si es muy vertical (ratio < 0.6) y tiene buen tamaño,
+                            // probablemente es una foto horizontal rotada
+                            let isLandscapeFallback = img.width > img.height;
+                            if (aspectRatio < 0.6 && img.height > 800) {
+                                console.log('[EXIF] Heurística: imagen muy vertical, rotando 270°');
+                                canvas.width = img.height;
+                                canvas.height = img.width;
+                                ctx.save();
+                                ctx.translate(0, canvas.height);
+                                ctx.rotate(-Math.PI / 2);
+                                ctx.drawImage(img, 0, 0);
+                                ctx.restore();
+                                isLandscapeFallback = true; // Después de rotar, es horizontal
+                            } else {
+                                canvas.width = img.width;
+                                canvas.height = img.height;
+                                ctx.drawImage(img, 0, 0);
+                            }
+                            
+                            const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
+                            console.warn(`[EXIF] Fallback usado: ${canvas.width}x${canvas.height}, isLandscape: ${isLandscapeFallback}`);
+                            resolve({
+                                dataUrl: dataUrl,
+                                width: canvas.width,
+                                height: canvas.height,
+                                orientation: 1, // Sin EXIF, asumir normal
+                                isLandscape: isLandscapeFallback
+                            });
+                        });
+                    } catch (error) {
+                        reject(error);
+                    }
+                };
+                
+                img.onerror = () => {
+                    reject(new Error('Error cargando imagen'));
+                };
+                
+                img.src = URL.createObjectURL(blob);
+            })
+            .catch(error => {
+                // Si falla la carga como blob, intentar método directo sin EXIF
+                const img = new Image();
+                img.crossOrigin = 'anonymous';
+                
+                img.onload = () => {
+                    try {
+                        const canvas = document.createElement('canvas');
+                        canvas.width = img.width;
+                        canvas.height = img.height;
+                        const ctx = canvas.getContext('2d');
+                        ctx.drawImage(img, 0, 0);
+                        const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
+                        // Determinar orientación por dimensiones (fallback)
+                        const isLandscape = img.width > img.height;
+                        resolve({
+                            dataUrl: dataUrl,
+                            width: img.width,
+                            height: img.height,
+                            orientation: 1, // Sin EXIF, asumir normal
+                            isLandscape: isLandscape
+                        });
+                    } catch (error) {
+                        reject(error);
+                    }
+                };
+                
+                img.onerror = () => {
+                    reject(new Error('Error cargando imagen'));
+                };
+                
+                img.src = url;
+            });
     });
 }
 
@@ -1596,28 +1942,35 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // Navegación de semanas
 function semanaAnterior() {
-    estado.fechaInicioSemana.setDate(estado.fechaInicioSemana.getDate() - 7);
-    estado.fechaInicioSemana.setHours(0, 0, 0, 0); // Normalizar a medianoche
+    const fecha = estado.fechaInicioSemana;
+    const año = fecha.getUTCFullYear();
+    const mes = fecha.getUTCMonth();
+    const dia = fecha.getUTCDate();
+    estado.fechaInicioSemana = new Date(Date.UTC(año, mes, dia - 7));
     generarCalendario();
 }
 
 function semanaSiguiente() {
-    estado.fechaInicioSemana.setDate(estado.fechaInicioSemana.getDate() + 7);
-    estado.fechaInicioSemana.setHours(0, 0, 0, 0); // Normalizar a medianoche
+    const fecha = estado.fechaInicioSemana;
+    const año = fecha.getUTCFullYear();
+    const mes = fecha.getUTCMonth();
+    const dia = fecha.getUTCDate();
+    estado.fechaInicioSemana = new Date(Date.UTC(año, mes, dia + 7));
     generarCalendario();
 }
 
 // Obtener rango de fechas visible en el calendario (lunes a viernes)
 function obtenerRangoFechasVisible() {
-    const fechaInicio = new Date(estado.fechaInicioSemana);
-    fechaInicio.setHours(0, 0, 0, 0);
+    const fechaInicio = estado.fechaInicioSemana;
+    const año = fechaInicio.getUTCFullYear();
+    const mes = fechaInicio.getUTCMonth();
+    const dia = fechaInicio.getUTCDate();
+    const fechaInicioUTC = new Date(Date.UTC(año, mes, dia));
     
-    const fechaFin = new Date(fechaInicio);
-    fechaFin.setDate(fechaInicio.getDate() + 4); // 5 días (lunes a viernes)
-    fechaFin.setHours(23, 59, 59, 999);
+    const fechaFin = new Date(Date.UTC(año, mes, dia + 4)); // 5 días (lunes a viernes)
     
     return {
-        fechaInicio: fechaInicio.toISOString().split('T')[0],
+        fechaInicio: fechaInicioUTC.toISOString().split('T')[0],
         fechaFin: fechaFin.toISOString().split('T')[0]
     };
 }
@@ -1755,16 +2108,23 @@ function generarMiniCalendario() {
         td.addEventListener('click', () => {
             const fecha = td.dataset.fecha;
             if (fecha) {
-                const fechaObj = new Date(fecha + 'T00:00:00');
-                fechaObj.setHours(0, 0, 0, 0); // Normalizar a medianoche
-                // Calcular el lunes de esa semana
-                const diaSemana = fechaObj.getDay();
-                const lunes = new Date(fechaObj);
-                lunes.setDate(fechaObj.getDate() - (diaSemana === 0 ? 6 : diaSemana - 1));
-                lunes.setHours(0, 0, 0, 0); // Normalizar a medianoche
-                estado.fechaInicioSemana = lunes;
-                generarCalendario();
-                generarMiniCalendario(); // Regenerar para actualizar el día seleccionado
+                // Parsear la fecha manualmente para evitar problemas de zona horaria
+                const partes = fecha.split('-');
+                if (partes.length === 3) {
+                    const año = parseInt(partes[0], 10);
+                    const mes = parseInt(partes[1], 10) - 1; // Los meses en Date son 0-indexados
+                    const dia = parseInt(partes[2], 10);
+                    const fechaObj = new Date(Date.UTC(año, mes, dia));
+                    
+                    // Calcular el lunes de esa semana
+                    const diaSemana = fechaObj.getUTCDay();
+                    const lunes = new Date(fechaObj);
+                    lunes.setUTCDate(fechaObj.getUTCDate() - (diaSemana === 0 ? 6 : diaSemana - 1));
+                    lunes.setUTCHours(0, 0, 0, 0); // Normalizar a medianoche UTC
+                    estado.fechaInicioSemana = lunes;
+                    generarCalendario();
+                    generarMiniCalendario(); // Regenerar para actualizar el día seleccionado
+                }
             }
         });
     });
