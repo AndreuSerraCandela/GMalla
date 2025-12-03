@@ -5,6 +5,7 @@ import sys
 from pathlib import Path
 from flask import Flask, render_template, jsonify, request
 from datetime import date, datetime, timedelta
+import pyodbc
 
 # Agregar el directorio raíz al path para importaciones
 sys.path.insert(0, str(Path(__file__).parent))
@@ -314,15 +315,112 @@ def mover_incidencia():
         }), 500
 
 
+@app.route('/api/buscar-elementos', methods=['GET'])
+def buscar_elementos():
+    """API para buscar elementos en la base de datos SQL Server"""
+    try:
+        busqueda = request.args.get('q', '').strip()
+        
+        if not busqueda:
+            return jsonify({
+                'success': True,
+                'elementos': []
+            })
+        
+        # Configuración de conexión SQL Server
+        server = '192.168.10.190'
+        database = 'Malla2009'
+        username = 'SA'
+        password = 'SA1234sa'
+        
+        # Intentar diferentes drivers ODBC
+        drivers_odbc = [
+            'ODBC Driver 17 for SQL Server',
+            'ODBC Driver 18 for SQL Server',
+            'ODBC Driver 13 for SQL Server',
+            'SQL Server'
+        ]
+        
+        conn = None
+        for driver in drivers_odbc:
+            try:
+                connection_string = (
+                    f'DRIVER={{{driver}}};'
+                    f'SERVER={server};'
+                    f'DATABASE={database};'
+                    f'UID={username};'
+                    f'PWD={password};'
+                )
+                # Agregar TrustServerCertificate solo para drivers 17 y 18
+                if '17' in driver or '18' in driver:
+                    connection_string += 'TrustServerCertificate=yes;'
+                
+                conn = pyodbc.connect(connection_string)
+                break
+            except Exception as e:
+                print(f"[INFO] No se pudo conectar con {driver}: {str(e)}")
+                continue
+        
+        if not conn:
+            raise Exception('No se pudo conectar a la base de datos SQL Server. Verifique que pyodbc esté instalado y que haya un driver ODBC disponible.')
+        
+        try:
+            cursor = conn.cursor()
+            
+            # Consulta SQL con filtro LIKE
+            query = """
+                SELECT TOP 20
+                    [Empresa],
+                    [No_],
+                    [Name],
+                    [Tipo]
+                FROM [dbo].[ElementosMallorca]
+                WHERE [No_] LIKE ? OR [Name] LIKE ?
+                ORDER BY [No_]
+            """
+            
+            # Usar % para búsqueda parcial
+            busqueda_pattern = f'%{busqueda}%'
+            cursor.execute(query, (busqueda_pattern, busqueda_pattern))
+            
+            elementos = []
+            for row in cursor:
+                elementos.append({
+                    'empresa': row[0] or '',
+                    'no': row[1] or '',
+                    'name': row[2] or '',
+                    'tipo': row[3] or ''
+                })
+            
+            cursor.close()
+        finally:
+            if conn:
+                conn.close()
+        
+        return jsonify({
+            'success': True,
+            'elementos': elementos
+        })
+        
+    except Exception as e:
+        print(f"[ERROR] Error al buscar elementos: {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'elementos': []
+        }), 500
+
+
 @app.route('/api/actualizar-incidencia', methods=['POST'])
 def actualizar_incidencia():
-    """API para actualizar descripción y fecha/hora de una incidencia"""
+    """API para actualizar descripción, fecha/hora y recurso de una incidencia"""
     try:
         data = request.json
         
         id_gtask = data.get('id_gtask')
         nueva_descripcion = data.get('descripcion')
         nueva_fecha_hora = data.get('fecha_hora')
+        nuevo_recurso = data.get('recurso')
         
         if not id_gtask:
             return jsonify({
@@ -356,6 +454,10 @@ def actualizar_incidencia():
                     'success': False,
                     'error': f'Error al parsear fecha/hora: {str(e)}'
                 }), 400
+        
+        # Actualizar recurso si se proporciona
+        if nuevo_recurso is not None:
+            incidencia.recurso = nuevo_recurso
         
         # Actualizar en Business Central
         exito = bc_client.actualizar_incidencia(incidencia)

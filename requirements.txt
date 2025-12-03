@@ -11,3 +11,6 @@ python-dotenv>=1.0.0
 # Framework web
 Flask>=3.0.0
 
+# Conexión a SQL Server
+pyodbc>=5.0.0
+

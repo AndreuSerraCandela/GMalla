@@ -6,7 +6,9 @@ let estado = {
     asignaciones: {}, // { usuario_id: { fecha: [incidencias] } }
     autenticado: false,
     usuarioActual: null,
-    usuariosFiltrados: null // null = todos, Set de IDs = usuarios filtrados
+    usuariosFiltrados: null, // null = todos, Set de IDs = usuarios filtrados
+    miniCalendarioMes: null, // Mes del mini calendario (0-11)
+    miniCalendarioAño: null  // Año del mini calendario
 };
 
 // Inicialización
@@ -23,6 +25,10 @@ document.addEventListener('DOMContentLoaded', () => {
     const diasHastaLunes = diaSemana === 0 ? -6 : 1 - diaSemana; // Si es domingo, retroceder 6 días
     const lunes = new Date(Date.UTC(año, mes, dia + diasHastaLunes));
     estado.fechaInicioSemana = lunes;
+    
+    // Inicializar mes y año del mini calendario con el mes actual
+    estado.miniCalendarioMes = mes;
+    estado.miniCalendarioAño = año;
     
     // Verificar estado de autenticación
     verificarAutenticacion();
@@ -66,6 +72,10 @@ document.addEventListener('DOMContentLoaded', () => {
     // Asignación automática
     document.getElementById('asignar-automatico-btn').addEventListener('click', ejecutarAsignacionAutomatica);
     document.getElementById('reasignar-automatico-btn').addEventListener('click', ejecutarReasignacionAutomatica);
+    
+    // Navegación de semanas
+    document.getElementById('semana-anterior-btn').addEventListener('click', semanaAnterior);
+    document.getElementById('semana-siguiente-btn').addEventListener('click', semanaSiguiente);
     
     // Cargar filtro guardado
     cargarFiltroUsuarios();
@@ -229,11 +239,11 @@ async function cargarDatos() {
     // Actualizar lista de filtro después de cargar usuarios
     actualizarListaFiltroUsuarios();
     
-    // Generar sidebar
-    generarMiniCalendario();
-    generarFiltrosTipos();
-    
+    // Generar calendario principal primero
     generarCalendario();
+    
+    // Generar sidebar (el mini calendario se sincronizará automáticamente con la semana visible)
+    generarFiltrosTipos();
 }
 
 // Cargar usuarios desde la API
@@ -592,6 +602,9 @@ function generarCalendario() {
     
     // Asegurar que las incidencias sin asignar se muestren
     mostrarIncidenciasLibres();
+    
+    // Sincronizar mini calendario con la semana visible
+    actualizarMiniCalendarioDesdeSemana();
 }
 
 // Función para verificar si una incidencia debe mostrarse según los filtros
@@ -758,7 +771,140 @@ async function moverIncidencia(noIncidencia, usuarioOrigen, fechaOrigen, usuario
     }
 }
 
-// Mostrar incidencias libres (sin asignar o de usuarios no filtrados)
+// Crear elemento de incidencia simplificado (sin foto, solo número, recurso y descripción)
+function crearElementoIncidenciaSimplificado(incidencia) {
+    const div = document.createElement('div');
+    div.className = 'incidencia-libre-item';
+    div.draggable = true;
+    div.dataset.no = incidencia.no;
+    
+    const descripcion = incidencia.descripcion || 'Sin descripción';
+    const descripcionCorta = descripcion.length > 10 ? descripcion.substring(0, 10) + '...' : descripcion;
+    const recurso = incidencia.recurso || 'N/A';
+    const urlImagen = incidencia.url_primera_imagen || null;
+    
+    // Crear tooltip con descripción completa e imagen
+    const tooltipId = `tooltip-${incidencia.no.replace(/[^a-zA-Z0-9]/g, '-')}`;
+    div.dataset.tooltipId = tooltipId;
+    div.dataset.descripcionCompleta = descripcion;
+    if (urlImagen) {
+        div.dataset.urlImagen = urlImagen;
+    }
+    
+    div.innerHTML = `
+        <div class="incidencia-libre-header">
+            <span class="incidencia-libre-no">${incidencia.no}</span>
+            <span class="incidencia-libre-editar" data-id-gtask="${incidencia.id_gtask || incidencia.no}" title="Ver detalle">✎</span>
+        </div>
+        <div class="incidencia-libre-linea2">
+            <span class="incidencia-libre-recurso">📍 ${recurso}</span>
+            <span class="incidencia-libre-descripcion">${descripcionCorta}</span>
+        </div>
+    `;
+    
+    // Crear tooltip fuera del contenedor para evitar problemas de overflow
+    const tooltip = document.createElement('div');
+    tooltip.id = tooltipId;
+    tooltip.className = 'incidencia-libre-tooltip';
+    tooltip.innerHTML = `
+        <div class="tooltip-contenido">
+            ${urlImagen ? `<img src="${urlImagen}" alt="Imagen" class="tooltip-imagen" onerror="this.style.display='none'">` : ''}
+            <div class="tooltip-descripcion">${descripcion}</div>
+        </div>
+    `;
+    document.body.appendChild(tooltip);
+    
+    // Agregar event listener para el botón de editar
+    const editBtn = div.querySelector('.incidencia-libre-editar');
+    if (editBtn) {
+        editBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const idGtask = editBtn.dataset.idGtask;
+            abrirDetalleIncidencia(idGtask);
+        });
+    }
+    
+    // Event listeners para mostrar/ocultar tooltip
+    div.addEventListener('mouseenter', (e) => {
+        const tooltip = document.getElementById(tooltipId);
+        if (tooltip) {
+            // Obtener posición del elemento
+            const rect = div.getBoundingClientRect();
+            
+            // Mostrar tooltip temporalmente fuera de pantalla para calcular dimensiones
+            tooltip.style.display = 'block';
+            tooltip.style.opacity = '0';
+            tooltip.style.top = '-9999px';
+            tooltip.style.left = '-9999px';
+            
+            // Forzar reflow para que el navegador calcule las dimensiones
+            void tooltip.offsetWidth;
+            
+            // Calcular dimensiones del tooltip
+            const tooltipRect = tooltip.getBoundingClientRect();
+            
+            // Posicionar arriba de la tarjeta, centrado
+            let top = rect.top - tooltipRect.height - 8;
+            let left = rect.left + (rect.width / 2) - (tooltipRect.width / 2);
+            
+            // Ajustar si se sale por la izquierda
+            if (left < 10) {
+                left = 10;
+            }
+            
+            // Ajustar si se sale por la derecha
+            if (left + tooltipRect.width > window.innerWidth - 10) {
+                left = window.innerWidth - tooltipRect.width - 10;
+            }
+            
+            // Ajustar si se sale por arriba
+            if (top < 10) {
+                top = rect.bottom + 8; // Mostrar abajo en su lugar
+            }
+            
+            // Aplicar posición y mostrar con transición
+            tooltip.style.top = `${top}px`;
+            tooltip.style.left = `${left}px`;
+            // Usar setTimeout para permitir que el navegador aplique la posición antes de mostrar
+            setTimeout(() => {
+                tooltip.style.opacity = '1';
+            }, 10);
+        }
+    });
+    
+    div.addEventListener('mouseleave', () => {
+        const tooltip = document.getElementById(tooltipId);
+        if (tooltip) {
+            tooltip.style.opacity = '0';
+            setTimeout(() => {
+                tooltip.style.display = 'none';
+            }, 200); // Esperar a que termine la transición
+        }
+    });
+    
+    // Event listeners para drag & drop
+    div.addEventListener('dragstart', (e) => {
+        e.dataTransfer.setData('text/plain', incidencia.no);
+        e.dataTransfer.setData('application/json', JSON.stringify({
+            usuarioId: null,
+            fecha: null
+        }));
+        div.classList.add('dragging');
+        // Ocultar tooltip al arrastrar
+        const tooltip = document.getElementById(tooltipId);
+        if (tooltip) {
+            tooltip.style.display = 'none';
+        }
+    });
+    
+    div.addEventListener('dragend', () => {
+        div.classList.remove('dragging');
+    });
+    
+    return div;
+}
+
+// Mostrar incidencias libres (sin asignar o de usuarios no filtrados) agrupadas por tipo
 function mostrarIncidenciasLibres() {
     const container = document.getElementById('lista-incidencias-libres');
     if (!container) return;
@@ -807,9 +953,64 @@ function mostrarIncidenciasLibres() {
         return;
     }
     
-    incidenciasLibres.forEach(incidencia => {
-        const div = crearElementoIncidencia(incidencia, null, null);
-        container.appendChild(div);
+    // Agrupar incidencias por tipo
+    const incidenciasPorTipo = {};
+    incidenciasLibres.forEach(inc => {
+        const tipo = inc.tipo_incidencia || 'Sin tipo';
+        if (!incidenciasPorTipo[tipo]) {
+            incidenciasPorTipo[tipo] = [];
+        }
+        incidenciasPorTipo[tipo].push(inc);
+    });
+    
+    // Crear grupos colapsables por tipo
+    Object.keys(incidenciasPorTipo).sort().forEach(tipo => {
+        const incidencias = incidenciasPorTipo[tipo];
+        const tipoClase = obtenerColorPorTipo(tipo);
+        
+        // Crear contenedor del grupo
+        const grupoDiv = document.createElement('div');
+        grupoDiv.className = 'grupo-tipo-incidencia';
+        
+        // Crear header del grupo (colapsable)
+        const headerDiv = document.createElement('div');
+        headerDiv.className = 'grupo-tipo-header';
+        headerDiv.innerHTML = `
+            <span class="grupo-tipo-icon">▶</span>
+            <span class="grupo-tipo-nombre">${tipo}</span>
+            <span class="grupo-tipo-contador">(${incidencias.length})</span>
+        `;
+        
+        // Crear contenedor de incidencias (inicialmente oculto)
+        const incidenciasDiv = document.createElement('div');
+        incidenciasDiv.className = 'grupo-tipo-incidencias';
+        incidenciasDiv.style.display = 'none';
+        
+        // Agregar incidencias al contenedor
+        incidencias.forEach(incidencia => {
+            const incDiv = crearElementoIncidenciaSimplificado(incidencia);
+            incidenciasDiv.appendChild(incDiv);
+        });
+        
+        // Event listener para expandir/colapsar
+        headerDiv.addEventListener('click', () => {
+            const estaExpandido = incidenciasDiv.style.display !== 'none';
+            const icon = headerDiv.querySelector('.grupo-tipo-icon');
+            
+            if (estaExpandido) {
+                incidenciasDiv.style.display = 'none';
+                icon.textContent = '▶';
+                headerDiv.classList.remove('expandido');
+            } else {
+                incidenciasDiv.style.display = 'flex';
+                icon.textContent = '▼';
+                headerDiv.classList.add('expandido');
+            }
+        });
+        
+        grupoDiv.appendChild(headerDiv);
+        grupoDiv.appendChild(incidenciasDiv);
+        container.appendChild(grupoDiv);
     });
 }
 
@@ -979,8 +1180,14 @@ function mostrarDetalleIncidencia(detalle) {
             </div>
             <div class="detalle-campo">
                 <label>Elemento:${geolocalizacionIcono}</label>
-                <p>${detalle.resource || 'N/A'}</p>
-                ${detalle.resource_name ? `<p class="detalle-subcampo">${detalle.resource_name}</p>` : ''}
+                <div style="position: relative;">
+                    <input type="text" id="edit-resource" class="detalle-input" 
+                           value="${detalle.resource || ''}" 
+                           placeholder="Buscar elemento..."
+                           autocomplete="off">
+                    <div id="resource-autocomplete" class="autocomplete-dropdown" style="display: none;"></div>
+                </div>
+                ${detalle.resource_name ? `<p class="detalle-subcampo" id="resource-name-display">${detalle.resource_name}</p>` : '<p class="detalle-subcampo" id="resource-name-display" style="display: none;"></p>'}
             </div>
             <div class="detalle-acciones">
                 <button id="guardar-cambios-btn" class="btn-guardar">💾 Guardar Cambios</button>
@@ -996,6 +1203,94 @@ function mostrarDetalleIncidencia(detalle) {
         guardarBtn.addEventListener('click', () => {
             guardarCambiosIncidencia();
         });
+    }
+    
+    // Configurar autocompletado para el campo resource
+    const resourceInput = document.getElementById('edit-resource');
+    const autocompleteDiv = document.getElementById('resource-autocomplete');
+    if (resourceInput && autocompleteDiv) {
+        let timeoutBusqueda = null;
+        let elementosCargados = [];
+        
+        resourceInput.addEventListener('input', (e) => {
+            const busqueda = e.target.value.trim();
+            
+            // Limpiar timeout anterior
+            if (timeoutBusqueda) {
+                clearTimeout(timeoutBusqueda);
+            }
+            
+            // Si está vacío, ocultar dropdown
+            if (!busqueda) {
+                autocompleteDiv.style.display = 'none';
+                return;
+            }
+            
+            // Esperar 300ms antes de buscar (debounce)
+            timeoutBusqueda = setTimeout(async () => {
+                try {
+                    const response = await fetch(`/api/buscar-elementos?q=${encodeURIComponent(busqueda)}`);
+                    const data = await response.json();
+                    
+                    if (data.success && data.elementos && data.elementos.length > 0) {
+                        elementosCargados = data.elementos;
+                        mostrarAutocompletado(data.elementos, busqueda);
+                    } else {
+                        autocompleteDiv.style.display = 'none';
+                        elementosCargados = [];
+                    }
+                } catch (error) {
+                    console.error('Error al buscar elementos:', error);
+                    autocompleteDiv.style.display = 'none';
+                }
+            }, 300);
+        });
+        
+        // Ocultar dropdown al hacer clic fuera
+        document.addEventListener('click', (e) => {
+            if (autocompleteDiv && resourceInput && 
+                !resourceInput.contains(e.target) && 
+                !autocompleteDiv.contains(e.target)) {
+                autocompleteDiv.style.display = 'none';
+            }
+        });
+        
+        // Función para mostrar el dropdown de autocompletado
+        function mostrarAutocompletado(elementos, busqueda) {
+            autocompleteDiv.innerHTML = '';
+            
+            elementos.forEach((elemento, index) => {
+                const item = document.createElement('div');
+                item.className = 'autocomplete-item';
+                item.innerHTML = `
+                    <strong>${elemento.no || ''}</strong>
+                    ${elemento.name ? `<span style="color: #666; margin-left: 10px;">${elemento.name}</span>` : ''}
+                    ${elemento.tipo ? `<span style="color: #999; margin-left: 10px; font-size: 0.9em;">(${elemento.tipo})</span>` : ''}
+                `;
+                
+                item.addEventListener('click', () => {
+                    resourceInput.value = elemento.no;
+                    const nameDisplay = document.getElementById('resource-name-display');
+                    if (nameDisplay) {
+                        nameDisplay.textContent = elemento.name || '';
+                        nameDisplay.style.display = elemento.name ? 'block' : 'none';
+                    }
+                    autocompleteDiv.style.display = 'none';
+                });
+                
+                // Resaltar al pasar el mouse
+                item.addEventListener('mouseenter', () => {
+                    item.style.backgroundColor = '#f0f0f0';
+                });
+                item.addEventListener('mouseleave', () => {
+                    item.style.backgroundColor = '';
+                });
+                
+                autocompleteDiv.appendChild(item);
+            });
+            
+            autocompleteDiv.style.display = 'block';
+        }
     }
 }
 
@@ -1033,16 +1328,18 @@ async function guardarCambiosIncidencia() {
     
     const descripcionInput = document.getElementById('edit-descripcion');
     const fechaHoraInput = document.getElementById('edit-fecha-hora');
+    const resourceInput = document.getElementById('edit-resource');
     const guardarBtn = document.getElementById('guardar-cambios-btn');
     const mensajeSpan = document.getElementById('guardar-mensaje');
     
-    if (!descripcionInput || !fechaHoraInput) {
+    if (!descripcionInput || !fechaHoraInput || !resourceInput) {
         alert('Error: No se encontraron los campos de edición');
         return;
     }
     
     const nuevaDescripcion = descripcionInput.value.trim();
     const nuevaFechaHora = fechaHoraInput.value;
+    const nuevoRecurso = resourceInput.value.trim();
     
     // Validar que haya cambios
     const descripcionOriginal = detalleActual.description || '';
@@ -1063,7 +1360,11 @@ async function guardarCambiosIncidencia() {
         } catch {}
     }
     
-    if (nuevaDescripcion === descripcionOriginalTexto && nuevaFechaHora === fechaOriginalInput) {
+    const recursoOriginal = detalleActual.resource || '';
+    
+    if (nuevaDescripcion === descripcionOriginalTexto && 
+        nuevaFechaHora === fechaOriginalInput && 
+        nuevoRecurso === recursoOriginal) {
         if (mensajeSpan) {
             mensajeSpan.textContent = 'No hay cambios para guardar';
             mensajeSpan.className = 'guardar-mensaje guardar-mensaje-info';
@@ -1094,7 +1395,8 @@ async function guardarCambiosIncidencia() {
         const datosActualizacion = {
             id_gtask: idGtaskActual,
             descripcion: nuevaDescripcion,
-            fecha_hora: nuevaFechaHora
+            fecha_hora: nuevaFechaHora,
+            recurso: nuevoRecurso
         };
         
         const response = await fetch('/api/actualizar-incidencia', {
@@ -1112,6 +1414,9 @@ async function guardarCambiosIncidencia() {
             detalleActual.description = nuevaDescripcion;
             if (nuevaFechaHora) {
                 detalleActual.fecha = new Date(nuevaFechaHora).toISOString();
+            }
+            if (nuevoRecurso) {
+                detalleActual.resource = nuevoRecurso;
             }
             
             if (mensajeSpan) {
@@ -1891,6 +2196,8 @@ function semanaAnterior() {
     const dia = fecha.getUTCDate();
     estado.fechaInicioSemana = new Date(Date.UTC(año, mes, dia - 7));
     generarCalendario();
+    // Actualizar mini calendario para mostrar el mes de la semana visible
+    actualizarMiniCalendarioDesdeSemana();
 }
 
 function semanaSiguiente() {
@@ -1900,6 +2207,17 @@ function semanaSiguiente() {
     const dia = fecha.getUTCDate();
     estado.fechaInicioSemana = new Date(Date.UTC(año, mes, dia + 7));
     generarCalendario();
+    // Actualizar mini calendario para mostrar el mes de la semana visible
+    actualizarMiniCalendarioDesdeSemana();
+}
+
+// Actualizar el mes/año del mini calendario basado en la semana visible
+function actualizarMiniCalendarioDesdeSemana() {
+    if (estado.fechaInicioSemana) {
+        estado.miniCalendarioMes = estado.fechaInicioSemana.getUTCMonth();
+        estado.miniCalendarioAño = estado.fechaInicioSemana.getUTCFullYear();
+        generarMiniCalendario();
+    }
 }
 
 // Obtener rango de fechas visible en el calendario (lunes a viernes)
@@ -1969,14 +2287,46 @@ async function ejecutarAsignacionAutomatica() {
     }
 }
 
+// Navegación del mini calendario
+function mesAnteriorMiniCalendario() {
+    if (estado.miniCalendarioMes === null || estado.miniCalendarioAño === null) {
+        const hoy = new Date();
+        estado.miniCalendarioMes = hoy.getMonth();
+        estado.miniCalendarioAño = hoy.getFullYear();
+    }
+    
+    estado.miniCalendarioMes--;
+    if (estado.miniCalendarioMes < 0) {
+        estado.miniCalendarioMes = 11;
+        estado.miniCalendarioAño--;
+    }
+    generarMiniCalendario();
+}
+
+function mesSiguienteMiniCalendario() {
+    if (estado.miniCalendarioMes === null || estado.miniCalendarioAño === null) {
+        const hoy = new Date();
+        estado.miniCalendarioMes = hoy.getMonth();
+        estado.miniCalendarioAño = hoy.getFullYear();
+    }
+    
+    estado.miniCalendarioMes++;
+    if (estado.miniCalendarioMes > 11) {
+        estado.miniCalendarioMes = 0;
+        estado.miniCalendarioAño++;
+    }
+    generarMiniCalendario();
+}
+
 // Generar mini calendario en el sidebar
 function generarMiniCalendario() {
     const container = document.getElementById('mini-calendario');
     if (!container) return;
     
     const hoy = new Date();
-    const mes = hoy.getMonth();
-    const año = hoy.getFullYear();
+    // Usar el mes y año del estado, o el mes/año actual si no están definidos
+    const mes = estado.miniCalendarioMes !== null ? estado.miniCalendarioMes : hoy.getMonth();
+    const año = estado.miniCalendarioAño !== null ? estado.miniCalendarioAño : hoy.getFullYear();
     
     // Obtener primer día del mes y día de la semana
     const primerDia = new Date(año, mes, 1);
@@ -1993,7 +2343,9 @@ function generarMiniCalendario() {
     
     let html = `
         <div class="mini-calendario-header">
+            <span class="mini-calendario-nav" id="mes-anterior-mini" title="Mes anterior">◀</span>
             <span>${meses[mes]} ${año}</span>
+            <span class="mini-calendario-nav" id="mes-siguiente-mini" title="Mes siguiente">▶</span>
         </div>
         <table>
             <thead>
@@ -2066,11 +2418,21 @@ function generarMiniCalendario() {
                     lunes.setUTCHours(0, 0, 0, 0); // Normalizar a medianoche UTC
                     estado.fechaInicioSemana = lunes;
                     generarCalendario();
-                    generarMiniCalendario(); // Regenerar para actualizar el día seleccionado
+                    actualizarMiniCalendarioDesdeSemana(); // Actualizar para mostrar el mes correcto
                 }
             }
         });
     });
+    
+    // Agregar event listeners para navegación de meses
+    const mesAnteriorBtn = document.getElementById('mes-anterior-mini');
+    const mesSiguienteBtn = document.getElementById('mes-siguiente-mini');
+    if (mesAnteriorBtn) {
+        mesAnteriorBtn.addEventListener('click', mesAnteriorMiniCalendario);
+    }
+    if (mesSiguienteBtn) {
+        mesSiguienteBtn.addEventListener('click', mesSiguienteMiniCalendario);
+    }
 }
 
 // Generar filtros de tipos de incidencias
