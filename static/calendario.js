@@ -912,9 +912,15 @@ function mostrarDetalleIncidencia(detalle) {
         imagenesHTML = '<div class="detalle-imagenes"><h3>Imágenes:</h3><div class="galeria-imagenes">';
         detalle.image.forEach(img => {
             if (img.url) {
+                // Detectar si la imagen es vertical basándose en el nombre del archivo
+                const esVertical = esImagenVertical(img.url);
+                const claseRotacion = esVertical ? 'imagen-vertical-rotada' : '';
+                const claseContenedor = esVertical ? 'imagen-item-vertical' : '';
                 imagenesHTML += `
-                    <div class="imagen-item">
-                        <img src="${img.url}" alt="${img.name || 'Imagen'}" onclick="abrirImagenGrande('${img.url}')">
+                    <div class="imagen-item ${claseContenedor}">
+                        <img src="${img.url}" alt="${img.name || 'Imagen'}" 
+                             class="${claseRotacion}" 
+                             onclick="abrirImagenGrande('${img.url}')">
                     </div>
                 `;
             }
@@ -1273,17 +1279,10 @@ async function generarPDF(detalle, idGtask) {
         
         yPos += lineHeight + 3;
         
-        // Descripción debajo del Tipo de Incidencia (con ancho limitado para no superponerse con el QR)
+        // Descripción debajo del Tipo de Incidencia
         doc.setFont('helvetica', 'bold');
         doc.text('Descripción:', margin, yPos);
-        
         doc.setFont('helvetica', 'normal');
-        doc.setFont('helvetica', 'bold');
-        doc.text('Usuario:', margin + mitadAncho, yPos);
-        doc.setFont('helvetica', 'normal');
-        const userId = detalle.user || detalle.user_name;
-        const nombreUsuario = obtenerNombreUsuario(userId);
-        doc.text(nombreUsuario, margin + mitadAncho + 20, yPos);
         yPos += lineHeight;
         // Limpiar HTML de la descripción
         let descripcion = detalle.description || 'Sin descripción';
@@ -1294,6 +1293,15 @@ async function generarPDF(detalle, idGtask) {
         const descripcionLines = doc.splitTextToSize(descripcion, contentWidth);
         doc.text(descripcionLines, margin, yPos);
         yPos += descripcionLines.length * lineHeight + 3;
+        
+        // Usuario debajo de "Usuario:"
+        doc.setFont('helvetica', 'bold');
+        doc.text('Usuario:', margin, yPos);
+        doc.setFont('helvetica', 'normal');
+        const userId = detalle.user || detalle.user_name;
+        const nombreUsuario = obtenerNombreUsuario(userId);
+        doc.text(nombreUsuario, margin + 25, yPos);
+        yPos += lineHeight + 3;
         
         // Preparar QR de ubicación antes de mostrar Elemento (si hay coordenadas)
         if (detalle.puntoX && detalle.puntoY) {
@@ -1331,21 +1339,11 @@ async function generarPDF(detalle, idGtask) {
             }
         }
         
-        // Elemento y Ubicación (QR) en la misma línea
+        // Elemento
         doc.setFont('helvetica', 'bold');
         doc.text('Elemento:', margin, yPos);
         doc.setFont('helvetica', 'normal');
         doc.text(detalle.resource || 'N/A', margin + 25, yPos);
-        
-        // Ubicación (QR) a la derecha
-        if (qrMapsDataUrl) {
-            doc.setFont('helvetica', 'bold');
-            doc.setFontSize(10);
-            doc.text('Ubicación:', margin + mitadAncho, yPos);
-            doc.setFontSize(12);
-            // Añadir el QR pequeño a la derecha
-            doc.addImage(qrMapsDataUrl, 'PNG', margin + mitadAncho + 25, yPos - 3, qrMapsSize, qrMapsSize);
-        }
         yPos += lineHeight;
         
         if (detalle.resource_name) {
@@ -1356,9 +1354,16 @@ async function generarPDF(detalle, idGtask) {
             doc.setFont('helvetica', 'normal');
             yPos += lineHeight;
         }
-        yPos += 3;
         
-        // La geolocalización ya se añadió debajo del Elemento con el QR
+        // Ubicación (QR) debajo del Elemento
+        if (qrMapsDataUrl) {
+            doc.setFont('helvetica', 'bold');
+            doc.text('Ubicación:', margin, yPos);
+            // Añadir el QR pequeño debajo del texto
+            doc.addImage(qrMapsDataUrl, 'PNG', margin + 30, yPos - 2, qrMapsSize, qrMapsSize);
+            yPos += qrMapsSize + 3;
+        }
+        yPos += 3;
         
         // Imágenes (sin título, directamente las imágenes)
         if (detalle.image && Array.isArray(detalle.image) && detalle.image.length > 0) {
@@ -1369,69 +1374,137 @@ async function generarPDF(detalle, idGtask) {
             const maxImageHeight = pageHeight - margin - yPos - 20; // Altura máxima disponible
             const spacing = 10; // Espacio entre imágenes
             
+            // Separar imágenes en horizontales y verticales
+            const imagenesHorizontales = [];
+            const imagenesVerticales = [];
+            
+            // Primero cargar todas las imágenes y clasificarlas
             for (let i = 0; i < detalle.image.length; i++) {
                 const img = detalle.image[i];
                 if (img.url) {
                     try {
-                        // Cargar imagen desde URL con sus dimensiones
                         const imgInfo = await loadImageWithDimensions(img.url);
                         if (imgInfo && imgInfo.dataUrl) {
-                            const imgWidth = imgInfo.width;
-                            const imgHeight = imgInfo.height;
-                            // Usar la orientación EXIF si está disponible, sino usar dimensiones
                             const isLandscape = imgInfo.isLandscape !== undefined 
                                 ? imgInfo.isLandscape 
-                                : imgWidth > imgHeight;
-                            
-                            // Calcular dimensiones de impresión - todas las imágenes una por fila
-                            let printWidth, printHeight;
+                                : imgInfo.width > imgInfo.height;
                             
                             if (isLandscape) {
-                                // Imagen horizontal: usar ancho completo o casi completo
-                                printWidth = fullContentWidth;
-                                printHeight = (printWidth * imgHeight) / imgWidth;
-                                
-                                // Si es muy alta, limitar altura y ajustar ancho
-                                if (printHeight > maxImageHeight) {
-                                    printHeight = maxImageHeight;
-                                    printWidth = (printHeight * imgWidth) / imgHeight;
-                                }
+                                imagenesHorizontales.push({ ...img, imgInfo });
                             } else {
-                                // Imagen vertical: usar ancho razonable (no todo el ancho)
-                                printWidth = fullContentWidth * 0.5; // Mitad del ancho disponible
-                                printHeight = (printWidth * imgHeight) / imgWidth;
-                                
-                                // Si es muy alta, limitar altura
-                                if (printHeight > maxImageHeight) {
-                                    printHeight = maxImageHeight;
-                                    printWidth = (printHeight * imgWidth) / imgHeight;
-                                }
+                                imagenesVerticales.push({ ...img, imgInfo });
                             }
-                            
-                            // Verificar si hay espacio en la página
-                            if (yPos + printHeight > pageHeight - margin) {
-                                doc.addPage();
-                                yPos = margin;
-                            }
-                            
-                            // Centrar imagen si es vertical (más pequeña)
-                            let xPos = margin;
-                            if (!isLandscape && printWidth < fullContentWidth * 0.8) {
-                                // Centrar imágenes verticales
-                                const remainingWidth = fullContentWidth - printWidth;
-                                if (remainingWidth > 0) {
-                                    xPos = margin + (remainingWidth / 2);
-                                }
-                            }
-                            
-                            doc.addImage(imgInfo.dataUrl, 'JPEG', xPos, yPos, printWidth, printHeight);
-                            
-                            // Avanzar posición Y para la siguiente imagen
-                            yPos += printHeight + spacing;
                         }
                     } catch (error) {
                         console.error(`Error cargando imagen ${img.url}:`, error);
                     }
+                }
+            }
+            
+            // Procesar primero las imágenes horizontales (una por fila)
+            for (let i = 0; i < imagenesHorizontales.length; i++) {
+                const img = imagenesHorizontales[i];
+                const imgInfo = img.imgInfo;
+                const imgWidth = imgInfo.width;
+                const imgHeight = imgInfo.height;
+                
+                // Calcular dimensiones de impresión
+                let printWidth = fullContentWidth;
+                let printHeight = (printWidth * imgHeight) / imgWidth;
+                
+                // Si es muy alta, limitar altura y ajustar ancho
+                if (printHeight > maxImageHeight) {
+                    printHeight = maxImageHeight;
+                    printWidth = (printHeight * imgWidth) / imgHeight;
+                }
+                
+                // Verificar si hay espacio en la página
+                if (yPos + printHeight > pageHeight - margin) {
+                    doc.addPage();
+                    yPos = margin;
+                }
+                
+                doc.addImage(imgInfo.dataUrl, 'JPEG', margin, yPos, printWidth, printHeight);
+                yPos += printHeight + spacing;
+            }
+            
+            // Procesar luego las imágenes verticales (dos por fila)
+            // Tamaño máximo de referencia: 1080x1920 píxeles
+            const maxVerticalWidthPx = 1080;
+            const maxVerticalHeightPx = 1920;
+            
+            // Calcular ancho disponible para cada imagen vertical (dos por fila con espacio)
+            const verticalSpacing = 5; // Espacio entre imágenes verticales en la misma fila
+            const verticalWidthPerImage = (fullContentWidth - verticalSpacing) / 2;
+            
+            // Almacenar alturas de cada fila para manejar correctamente el espaciado
+            let currentRowImages = [];
+            let currentRowMaxHeight = 0;
+            
+            for (let i = 0; i < imagenesVerticales.length; i++) {
+                const img = imagenesVerticales[i];
+                const imgInfo = img.imgInfo;
+                let imgWidth = imgInfo.width;
+                let imgHeight = imgInfo.height;
+                
+                // Si la imagen es más grande que 1080x1920, calcular dimensiones escaladas
+                if (imgWidth > maxVerticalWidthPx || imgHeight > maxVerticalHeightPx) {
+                    const scaleWidth = maxVerticalWidthPx / imgWidth;
+                    const scaleHeight = maxVerticalHeightPx / imgHeight;
+                    const scale = Math.min(scaleWidth, scaleHeight);
+                    // Usar dimensiones escaladas para calcular el tamaño de impresión
+                    imgWidth = imgWidth * scale;
+                    imgHeight = imgHeight * scale;
+                    console.log(`[PDF] Imagen vertical ${imgInfo.width}x${imgInfo.height} reducida a ${imgWidth}x${imgHeight} (escala: ${scale.toFixed(2)})`);
+                }
+                
+                // Calcular dimensiones de impresión para la imagen vertical usando las dimensiones (posiblemente escaladas)
+                let printWidth = verticalWidthPerImage;
+                let printHeight = (printWidth * imgHeight) / imgWidth;
+                
+                // Limitar altura máxima
+                if (printHeight > maxImageHeight) {
+                    printHeight = maxImageHeight;
+                    printWidth = (printHeight * imgWidth) / imgHeight;
+                }
+                
+                // Determinar posición X: primera imagen a la izquierda, segunda a la derecha
+                const isFirstInRow = currentRowImages.length === 0;
+                let xPos = margin;
+                if (!isFirstInRow) {
+                    xPos = margin + verticalWidthPerImage + verticalSpacing;
+                }
+                
+                // Agregar imagen a la fila actual
+                currentRowImages.push({ imgInfo, printWidth, printHeight, xPos });
+                currentRowMaxHeight = Math.max(currentRowMaxHeight, printHeight);
+                
+                // Si es la segunda imagen de la fila o es la última, procesar la fila
+                const isSecondInRow = currentRowImages.length === 2;
+                const isLastImage = i === imagenesVerticales.length - 1;
+                
+                if (isSecondInRow || (isLastImage && currentRowImages.length > 0)) {
+                    // Verificar si hay espacio en la página para toda la fila
+                    if (yPos + currentRowMaxHeight > pageHeight - margin) {
+                        doc.addPage();
+                        yPos = margin;
+                        // Si hay dos imágenes pero no caben juntas, poner la segunda en nueva fila
+                        if (isSecondInRow && currentRowImages.length === 2) {
+                            currentRowImages[1].xPos = margin;
+                        }
+                    }
+                    
+                    // Dibujar todas las imágenes de la fila
+                    for (const rowImg of currentRowImages) {
+                        doc.addImage(rowImg.imgInfo.dataUrl, 'JPEG', rowImg.xPos, yPos, rowImg.printWidth, rowImg.printHeight);
+                    }
+                    
+                    // Avanzar posición Y después de dibujar la fila completa
+                    yPos += currentRowMaxHeight + spacing;
+                    
+                    // Resetear para la siguiente fila
+                    currentRowImages = [];
+                    currentRowMaxHeight = 0;
                 }
             }
         }
@@ -1474,304 +1547,174 @@ function loadImageAsDataUrl(url) {
     });
 }
 
-// Obtener orientación EXIF de un blob
-function getImageOrientation(blob) {
-    return new Promise((resolve) => {
-        const reader = new FileReader();
-        reader.onload = (e) => {
-            try {
-                const view = new DataView(e.target.result);
-                if (view.getUint16(0, false) !== 0xFFD8) {
-                    resolve(1); // No es JPEG
-                    return;
-                }
-                const length = view.byteLength;
-                let offset = 2;
-                
-                while (offset < length - 1) {
-                    const marker = view.getUint16(offset, false);
-                    offset += 2;
-                    
-                    if (marker === 0xFFE1) {
-                        // APP1 segment - puede contener EXIF
-                        const segmentLength = view.getUint16(offset, false);
-                        offset += 2;
-                        
-                        // Verificar si es EXIF
-                        if (offset + 4 < length && 
-                            view.getUint32(offset, false) === 0x45786966) { // "Exif"
-                            offset += 6; // Saltar "Exif\0\0"
-                            
-                            // Byte order
-                            const little = view.getUint16(offset, false) === 0x4949;
-                            offset += 2;
-                            
-                            // Verificar TIFF header
-                            if (view.getUint16(offset, little) === 0x002A) {
-                                offset += 2;
-                                const ifdOffset = view.getUint32(offset, little);
-                                offset = 2 + 2 + segmentLength - 2 - 2 + ifdOffset;
-                                
-                                if (offset < length) {
-                                    const tags = view.getUint16(offset, little);
-                                    offset += 2;
-                                    
-                                    for (let i = 0; i < tags && offset + 12 < length; i++) {
-                                        const tagOffset = offset + (i * 12);
-                                        if (view.getUint16(tagOffset, little) === 0x0112) {
-                                            const orientation = view.getUint16(tagOffset + 8, little);
-                                            resolve(orientation);
-                                            return;
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        offset += segmentLength - 2 - 6;
-                    } else if (marker >= 0xFFE0 && marker <= 0xFFEF) {
-                        // Otro segmento APP
-                        const segmentLength = view.getUint16(offset, false);
-                        offset += segmentLength;
-                    } else if (marker >= 0xFFC0 && marker <= 0xFFC3) {
-                        // SOF marker - ya pasamos los segmentos APP, salir
-                        break;
-                    } else {
-                        // Otro marker, intentar avanzar
-                        if (offset < length) {
-                            const segmentLength = view.getUint16(offset, false);
-                            if (segmentLength > 0 && segmentLength < 0xFF00) {
-                                offset += segmentLength;
-                            } else {
-                                break;
-                            }
-                        } else {
-                            break;
-                        }
-                    }
-                }
-                resolve(1); // Por defecto, orientación normal
-            } catch (error) {
-                console.warn('[EXIF] Error parseando EXIF:', error);
-                resolve(1); // Si hay error, asumir orientación normal
-            }
-        };
-        reader.onerror = () => {
-            console.warn('[EXIF] Error leyendo blob');
-            resolve(1);
-        };
-        reader.readAsArrayBuffer(blob);
-    });
+// Detectar si una imagen es vertical basándose en el nombre del archivo
+function esImagenVertical(url) {
+    try {
+        const urlObj = new URL(url);
+        const pathname = urlObj.pathname;
+        const filename = pathname.split('/').pop() || pathname;
+        return filename.startsWith('V_');
+    } catch (error) {
+        return false;
+    }
+}
+
+// Obtener orientación basándose en el nombre del archivo
+// H_ = horizontal, V_ = vertical, sin prefijo = horizontal por defecto
+function getImageOrientationFromFilename(url) {
+    try {
+        // Extraer el nombre del archivo de la URL
+        const urlObj = new URL(url);
+        const pathname = urlObj.pathname;
+        const filename = pathname.split('/').pop() || pathname;
+        
+        console.log(`[Orientación] URL: ${url}`);
+        console.log(`[Orientación] Nombre del archivo extraído: ${filename}`);
+        
+        // Verificar si el nombre empieza con "H_" o "V_"
+        if (filename.startsWith('H_')) {
+            // Horizontal: debe mostrarse horizontal (ancho > alto)
+            console.log(`[Orientación] Detectado prefijo H_ - Horizontal`);
+            return Promise.resolve({ orientation: 1, isLandscape: true, needsVertical: false });
+        } else if (filename.startsWith('V_')) {
+            // Vertical: debe mostrarse vertical (alto > ancho)
+            console.log(`[Orientación] Detectado prefijo V_ - Vertical`);
+            return Promise.resolve({ orientation: 1, isLandscape: false, needsVertical: true });
+        } else {
+            // Sin prefijo: asumir horizontal por defecto
+            console.log(`[Orientación] Sin prefijo detectado - Horizontal por defecto`);
+            return Promise.resolve({ orientation: 1, isLandscape: true, needsVertical: false });
+        }
+    } catch (error) {
+        console.warn('[Orientación] Error parseando nombre de archivo:', error);
+        // Por defecto, asumir horizontal
+        return Promise.resolve({ orientation: 1, isLandscape: true, needsVertical: false });
+    }
 }
 
 // Cargar imagen desde URL con sus dimensiones y orientación corregida
 function loadImageWithDimensions(url) {
     return new Promise((resolve, reject) => {
-        // Primero cargar la imagen como blob para leer EXIF
-        fetch(url)
-            .then(response => response.blob())
-            .then(blob => {
-                const img = new Image();
-                img.crossOrigin = 'anonymous';
-                
-                img.onload = () => {
-                    try {
-                        // Leer orientación EXIF
-                        getImageOrientation(blob).then(orientation => {
-                            const canvas = document.createElement('canvas');
-                            const ctx = canvas.getContext('2d');
-                            
-                            // Dimensiones que el navegador nos da
-                            // NOTA: El navegador moderno puede haber aplicado ya la rotación EXIF automáticamente
-                            let displayWidth = img.width;
-                            let displayHeight = img.height;
-                            
-                            console.log(`[EXIF] Orientación EXIF: ${orientation}, Dimensiones display: ${displayWidth}x${displayHeight}`);
-                            
-                            // Determinar dimensiones finales y si necesitamos rotar
-                            let finalWidth, finalHeight, needsRotation = false;
-                            const aspectRatio = displayWidth / displayHeight;
-                            const isVeryVertical = aspectRatio < 0.7; // Muy vertical (ancho mucho menor que alto)
-                            
-                            if (orientation === 6) {
-                                // 90° horario: el archivo está vertical pero debe mostrarse horizontal
-                                // Si el navegador NO aplicó la rotación: displayHeight > displayWidth
-                                // Si el navegador SÍ aplicó la rotación: displayWidth > displayHeight
-                                if (displayHeight > displayWidth) {
-                                    // Navegador NO rotó: necesitamos rotar nosotros
-                                    finalWidth = displayHeight;
-                                    finalHeight = displayWidth;
-                                    needsRotation = true;
-                                } else {
-                                    // Navegador ya rotó: usar dimensiones tal cual
-                                    finalWidth = displayWidth;
-                                    finalHeight = displayHeight;
-                                }
-                            } else if (orientation === 8) {
-                                // 270° horario: similar pero rotación inversa
-                                if (displayHeight > displayWidth) {
-                                    finalWidth = displayHeight;
-                                    finalHeight = displayWidth;
-                                    needsRotation = true;
-                                } else {
-                                    finalWidth = displayWidth;
-                                    finalHeight = displayHeight;
-                                }
-                            } else if (orientation === 3) {
-                                // 180°: rotar pero mantener dimensiones
-                                finalWidth = displayWidth;
-                                finalHeight = displayHeight;
-                                needsRotation = true;
-                            } else if (orientation === 1 && isVeryVertical && displayHeight > 1000) {
-                                // Heurística: si EXIF dice 1 (normal) pero la imagen es muy vertical
-                                // y tiene buen tamaño, probablemente es una foto de móvil tomada horizontal
-                                // que necesita rotación. Esto es común cuando los metadatos EXIF se pierden.
-                                console.log(`[EXIF] Heurística: imagen muy vertical (${aspectRatio.toFixed(2)}) con EXIF=1, rotando 270°`);
-                                finalWidth = displayHeight;
-                                finalHeight = displayWidth;
-                                needsRotation = true;
-                                // Usar orientación 8 para rotar 270° (o -90°)
-                                orientation = 8;
-                            } else {
-                                // Sin rotación
-                                finalWidth = displayWidth;
-                                finalHeight = displayHeight;
-                            }
-                            
-                            canvas.width = finalWidth;
-                            canvas.height = finalHeight;
-                            
-                            // Aplicar rotación si es necesaria
-                            if (needsRotation) {
-                                ctx.save();
-                                switch (orientation) {
-                                    case 3: // 180°
-                                        ctx.translate(canvas.width, canvas.height);
-                                        ctx.rotate(Math.PI);
-                                        ctx.drawImage(img, 0, 0, displayWidth, displayHeight);
-                                        break;
-                                    case 6: // 90° horario
-                                        ctx.translate(canvas.width, 0);
-                                        ctx.rotate(Math.PI / 2);
-                                        ctx.drawImage(img, 0, 0, displayWidth, displayHeight);
-                                        break;
-                                    case 8: // 270° horario
-                                        ctx.translate(0, canvas.height);
-                                        ctx.rotate(-Math.PI / 2);
-                                        ctx.drawImage(img, 0, 0, displayWidth, displayHeight);
-                                        break;
-                                }
-                                ctx.restore();
-                            } else {
-                                ctx.drawImage(img, 0, 0, displayWidth, displayHeight);
-                            }
-                            
-                            const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
-                            console.log(`[EXIF] Imagen final: ${canvas.width}x${canvas.height}, rotada: ${needsRotation}, orientación EXIF: ${orientation}`);
-                            
-                            // Determinar si la imagen original era horizontal o vertical basándose en EXIF
-                            // Si orientación es 6 u 8, la imagen fue tomada en horizontal (aunque esté guardada como vertical)
-                            // Si orientación es 1, 3, o sin rotación, usar las dimensiones finales después de rotar
-                            let isOriginalLandscape;
-                            if (orientation === 6 || orientation === 8) {
-                                // Orientación 6 u 8 significa que fue tomada horizontalmente
-                                // Después de rotar, las dimensiones finales serán width > height
-                                isOriginalLandscape = true;
-                            } else if (orientation === 3) {
-                                // 180° - la relación de aspecto se mantiene, usar dimensiones finales
-                                isOriginalLandscape = canvas.width > canvas.height;
-                            } else {
-                                // Sin rotación o rotación desconocida - usar dimensiones finales
-                                isOriginalLandscape = canvas.width > canvas.height;
-                            }
-                            
-                            resolve({
-                                dataUrl: dataUrl,
-                                width: canvas.width,
-                                height: canvas.height,
-                                orientation: orientation,
-                                isLandscape: isOriginalLandscape
-                            });
-                        }).catch(error => {
-                            console.warn('[EXIF] Error leyendo EXIF, intentando heurística:', error);
-                            // Fallback: si la imagen es muy vertical (height >> width) y grande,
-                            // podría ser una foto horizontal que necesita rotación
-                            const aspectRatio = img.width / img.height;
-                            const canvas = document.createElement('canvas');
-                            const ctx = canvas.getContext('2d');
-                            
-                            // Heurística: si es muy vertical (ratio < 0.6) y tiene buen tamaño,
-                            // probablemente es una foto horizontal rotada
-                            let isLandscapeFallback = img.width > img.height;
-                            if (aspectRatio < 0.6 && img.height > 800) {
-                                console.log('[EXIF] Heurística: imagen muy vertical, rotando 270°');
-                                canvas.width = img.height;
-                                canvas.height = img.width;
-                                ctx.save();
-                                ctx.translate(0, canvas.height);
-                                ctx.rotate(-Math.PI / 2);
-                                ctx.drawImage(img, 0, 0);
-                                ctx.restore();
-                                isLandscapeFallback = true; // Después de rotar, es horizontal
-                            } else {
-                                canvas.width = img.width;
-                                canvas.height = img.height;
-                                ctx.drawImage(img, 0, 0);
-                            }
-                            
-                            const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
-                            console.warn(`[EXIF] Fallback usado: ${canvas.width}x${canvas.height}, isLandscape: ${isLandscapeFallback}`);
-                            resolve({
-                                dataUrl: dataUrl,
-                                width: canvas.width,
-                                height: canvas.height,
-                                orientation: 1, // Sin EXIF, asumir normal
-                                isLandscape: isLandscapeFallback
-                            });
-                        });
-                    } catch (error) {
-                        reject(error);
+        // Obtener orientación basándose en el nombre del archivo
+        getImageOrientationFromFilename(url).then(({ orientation, isLandscape: isLandscapeFromFilename, needsVertical }) => {
+            const img = new Image();
+            img.crossOrigin = 'anonymous';
+            
+            img.onload = () => {
+                try {
+                    const canvas = document.createElement('canvas');
+                    const ctx = canvas.getContext('2d');
+                    
+                    // Dimensiones que el navegador nos da
+                    let displayWidth = img.width;
+                    let displayHeight = img.height;
+                    
+                    console.log(`[Orientación] Prefijo del archivo: orientación=${orientation}, isLandscape=${isLandscapeFromFilename}, needsVertical=${needsVertical}, Dimensiones display: ${displayWidth}x${displayHeight}`);
+                    
+                    // Determinar dimensiones finales y si necesitamos rotar
+                    let finalWidth, finalHeight, needsRotation = false;
+                    
+                    if (needsVertical) {
+                        // Debe mostrarse vertical (alto > ancho)
+                        // Si actualmente está horizontal (ancho > alto), rotar 90°
+                        if (displayWidth > displayHeight) {
+                            // Está horizontal, rotar para que sea vertical
+                            finalWidth = displayHeight;
+                            finalHeight = displayWidth;
+                            needsRotation = true;
+                            console.log(`[Orientación] Imagen con prefijo V_ está horizontal, rotando 90° para hacerla vertical`);
+                        } else {
+                            // Ya está vertical, no rotar
+                            finalWidth = displayWidth;
+                            finalHeight = displayHeight;
+                            console.log(`[Orientación] Imagen con prefijo V_ ya está vertical, no rotar`);
+                        }
+                    } else {
+                        // Debe mostrarse horizontal (ancho > alto)
+                        // Si actualmente está vertical (alto > ancho), rotar 90°
+                        if (displayHeight > displayWidth) {
+                            // Está vertical, rotar para que sea horizontal
+                            finalWidth = displayHeight;
+                            finalHeight = displayWidth;
+                            needsRotation = true;
+                            console.log(`[Orientación] Imagen con prefijo H_ o sin prefijo está vertical, rotando 90° para hacerla horizontal`);
+                        } else {
+                            // Ya está horizontal, no rotar
+                            finalWidth = displayWidth;
+                            finalHeight = displayHeight;
+                            console.log(`[Orientación] Imagen con prefijo H_ o sin prefijo ya está horizontal, no rotar`);
+                        }
                     }
-                };
-                
-                img.onerror = () => {
-                    reject(new Error('Error cargando imagen'));
-                };
-                
-                img.src = URL.createObjectURL(blob);
-            })
-            .catch(error => {
-                // Si falla la carga como blob, intentar método directo sin EXIF
-                const img = new Image();
-                img.crossOrigin = 'anonymous';
-                
-                img.onload = () => {
-                    try {
-                        const canvas = document.createElement('canvas');
-                        canvas.width = img.width;
-                        canvas.height = img.height;
-                        const ctx = canvas.getContext('2d');
-                        ctx.drawImage(img, 0, 0);
-                        const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
-                        // Determinar orientación por dimensiones (fallback)
-                        const isLandscape = img.width > img.height;
-                        resolve({
-                            dataUrl: dataUrl,
-                            width: img.width,
-                            height: img.height,
-                            orientation: 1, // Sin EXIF, asumir normal
-                            isLandscape: isLandscape
-                        });
-                    } catch (error) {
-                        reject(error);
+                    
+                    canvas.width = finalWidth;
+                    canvas.height = finalHeight;
+                    
+                    // Aplicar rotación si es necesaria
+                    if (needsRotation) {
+                        ctx.save();
+                        // 90° horario
+                        ctx.translate(canvas.width, 0);
+                        ctx.rotate(Math.PI / 2);
+                        ctx.drawImage(img, 0, 0, displayWidth, displayHeight);
+                        ctx.restore();
+                    } else {
+                        ctx.drawImage(img, 0, 0, displayWidth, displayHeight);
                     }
-                };
-                
-                img.onerror = () => {
-                    reject(new Error('Error cargando imagen'));
-                };
-                
-                img.src = url;
-            });
+                    
+                    const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
+                    console.log(`[Orientación] Imagen final: ${canvas.width}x${canvas.height}, rotada: ${needsRotation}, isLandscape: ${isLandscapeFromFilename}`);
+                    
+                    resolve({
+                        dataUrl: dataUrl,
+                        width: canvas.width,
+                        height: canvas.height,
+                        orientation: orientation,
+                        isLandscape: isLandscapeFromFilename
+                    });
+                } catch (error) {
+                    reject(error);
+                }
+            };
+            
+            img.onerror = () => {
+                reject(new Error('Error cargando imagen'));
+            };
+            
+            img.src = url;
+        }).catch(error => {
+            console.warn('[Orientación] Error obteniendo orientación, usando fallback:', error);
+            // Fallback: cargar imagen sin rotación
+            const img = new Image();
+            img.crossOrigin = 'anonymous';
+            
+            img.onload = () => {
+                try {
+                    const canvas = document.createElement('canvas');
+                    canvas.width = img.width;
+                    canvas.height = img.height;
+                    const ctx = canvas.getContext('2d');
+                    ctx.drawImage(img, 0, 0);
+                    const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
+                    // Determinar orientación por dimensiones (fallback)
+                    const isLandscape = img.width > img.height;
+                    resolve({
+                        dataUrl: dataUrl,
+                        width: img.width,
+                        height: img.height,
+                        orientation: 1, // Sin prefijo, asumir normal
+                        isLandscape: isLandscape
+                    });
+                } catch (error) {
+                    reject(error);
+                }
+            };
+            
+            img.onerror = () => {
+                reject(new Error('Error cargando imagen'));
+            };
+            
+            img.src = url;
+        });
     });
 }
 
