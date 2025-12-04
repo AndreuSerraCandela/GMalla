@@ -8,7 +8,8 @@ let estado = {
     usuarioActual: null,
     usuariosFiltrados: null, // null = todos, Set de IDs = usuarios filtrados
     miniCalendarioMes: null, // Mes del mini calendario (0-11)
-    miniCalendarioAño: null  // Año del mini calendario
+    miniCalendarioAño: null, // Año del mini calendario
+    vistaSimple: false // Vista simple activada/desactivada
 };
 
 // Inicialización
@@ -76,6 +77,9 @@ document.addEventListener('DOMContentLoaded', () => {
     // Navegación de semanas
     document.getElementById('semana-anterior-btn').addEventListener('click', semanaAnterior);
     document.getElementById('semana-siguiente-btn').addEventListener('click', semanaSiguiente);
+    
+    // Toggle vista simple
+    document.getElementById('vista-simple-btn').addEventListener('click', toggleVistaSimple);
     
     // Cargar filtro guardado
     cargarFiltroUsuarios();
@@ -542,13 +546,15 @@ function generarCalendario() {
             // Normalizar usuarioId para comparación
             const usuarioIdNormalizado = String(usuarioId);
             
+            // Recopilar todas las incidencias para este usuario y fecha
+            let incidenciasParaAgregar = [];
+            
             // Buscar incidencias para este usuario y fecha
             if (estado.asignaciones[usuarioIdNormalizado] && estado.asignaciones[usuarioIdNormalizado][fechaStr]) {
                 estado.asignaciones[usuarioIdNormalizado][fechaStr].forEach(incidencia => {
                     // Verificar si el tipo de incidencia está filtrado
                     if (debeMostrarIncidencia(incidencia)) {
-                        const incDiv = crearElementoIncidencia(incidencia, usuarioIdNormalizado, fechaStr);
-                        td.appendChild(incDiv);
+                        incidenciasParaAgregar.push(incidencia);
                     }
                 });
             }
@@ -566,12 +572,26 @@ function generarCalendario() {
                             usuarioIdNormalizado.includes(incUsuarioId)) {
                             // Verificar si el tipo de incidencia está filtrado
                             if (debeMostrarIncidencia(incidencia)) {
-                                const incDiv = crearElementoIncidencia(incidencia, usuarioIdNormalizado, fechaStr);
-                                td.appendChild(incDiv);
+                                incidenciasParaAgregar.push(incidencia);
                             }
                         }
                     });
                 }
+            });
+            
+            // Ordenar por hora si está en vista simple
+            if (estado.vistaSimple) {
+                incidenciasParaAgregar.sort((a, b) => {
+                    const horaA = a.fecha_hora ? new Date(a.fecha_hora).getTime() : 0;
+                    const horaB = b.fecha_hora ? new Date(b.fecha_hora).getTime() : 0;
+                    return horaA - horaB;
+                });
+            }
+            
+            // Agregar incidencias ordenadas
+            incidenciasParaAgregar.forEach(incidencia => {
+                const incDiv = crearElementoIncidencia(incidencia, usuarioIdNormalizado, fechaStr);
+                td.appendChild(incDiv);
             });
             
             // Hacer la celda droppable
@@ -670,7 +690,14 @@ function crearElementoIncidencia(incidencia, usuarioId, fecha) {
     const div = document.createElement('div');
     // Usar tipo de incidencia para el color en lugar del estado
     const tipoClase = obtenerColorPorTipo(incidencia.tipo_incidencia);
-    div.className = `incidencia ${tipoClase}`;
+    
+    // Si está en vista simple, usar clase diferente
+    if (estado.vistaSimple) {
+        div.className = `incidencia incidencia-simple ${tipoClase}`;
+    } else {
+        div.className = `incidencia ${tipoClase}`;
+    }
+    
     div.draggable = true;
     div.dataset.no = incidencia.no;
     div.dataset.usuario = usuarioId;
@@ -679,23 +706,72 @@ function crearElementoIncidencia(incidencia, usuarioId, fecha) {
     // Mostrar descripción como elemento principal (más importante)
     const descripcion = incidencia.descripcion || 'Sin descripción';
     const descripcionCorta = descripcion.length > 40 ? descripcion.substring(0, 40) + '...' : descripcion;
+    const recurso = incidencia.recurso || 'N/A';
     
-    // Agregar miniatura si hay URL de imagen
-    let imagenHTML = '';
-    if (incidencia.url_primera_imagen) {
-        imagenHTML = `<img src="${incidencia.url_primera_imagen}" alt="Imagen" class="incidencia-miniatura" onerror="this.style.display='none'">`;
+    // Formatear hora si existe fecha_hora
+    let horaHTML = '';
+    if (incidencia.fecha_hora) {
+        try {
+            const fechaHora = new Date(incidencia.fecha_hora);
+            const horas = String(fechaHora.getHours()).padStart(2, '0');
+            const minutos = String(fechaHora.getMinutes()).padStart(2, '0');
+            horaHTML = `<span class="incidencia-hora">${horas}:${minutos}</span>`;
+        } catch (e) {
+            // Si hay error al parsear, no mostrar hora
+        }
     }
     
-    div.innerHTML = `
-        <div class="incidencia-header">
-            <span class="incidencia-editar" data-id-gtask="${incidencia.id_gtask || incidencia.no}" title="Ver detalle">
-                ✏️
-            </span>
-        </div>
-        ${imagenHTML}
-        <div class="incidencia-descripcion">${descripcionCorta}</div>
-        <div class="incidencia-no">${incidencia.no}</div>
-    `;
+    // Crear tooltip si está en vista simple
+    let tooltipId = null;
+    const urlImagen = incidencia.url_primera_imagen || null;
+    
+    if (estado.vistaSimple) {
+        // Crear tooltip con descripción completa e imagen
+        tooltipId = `tooltip-calendario-${incidencia.no.replace(/[^a-zA-Z0-9]/g, '-')}`;
+        div.dataset.tooltipId = tooltipId;
+        
+        // Vista simple: hora arriba con línea roja, luego incidencia en cuadro gris
+        div.innerHTML = `
+            ${horaHTML ? `<div class="incidencia-hora-container">${horaHTML}<div class="incidencia-hora-linea"></div></div>` : ''}
+            <div class="incidencia-simple-box">
+                <div class="incidencia-simple-header">
+                    <span class="incidencia-simple-no">${incidencia.no}</span>
+                    <span class="incidencia-simple-recurso">${recurso}</span>
+                    <span class="incidencia-editar" data-id-gtask="${incidencia.id_gtask || incidencia.no}" title="Ver detalle">✎</span>
+                </div>
+                <div class="incidencia-simple-descripcion">${descripcionCorta}</div>
+            </div>
+        `;
+        
+        // Crear tooltip fuera del contenedor para evitar problemas de overflow
+        const tooltip = document.createElement('div');
+        tooltip.id = tooltipId;
+        tooltip.className = 'incidencia-libre-tooltip';
+        tooltip.innerHTML = `
+            <div class="tooltip-contenido">
+                ${urlImagen ? `<img src="${urlImagen}" alt="Imagen" class="tooltip-imagen" onerror="this.style.display='none'">` : ''}
+                <div class="tooltip-descripcion">${descripcion}</div>
+            </div>
+        `;
+        document.body.appendChild(tooltip);
+    } else {
+        // Vista normal: con imagen y más espacio
+        let imagenHTML = '';
+        if (incidencia.url_primera_imagen) {
+            imagenHTML = `<img src="${incidencia.url_primera_imagen}" alt="Imagen" class="incidencia-miniatura" onerror="this.style.display='none'">`;
+        }
+        
+        div.innerHTML = `
+            <div class="incidencia-header">
+                <span class="incidencia-editar" data-id-gtask="${incidencia.id_gtask || incidencia.no}" title="Ver detalle">
+                    ✏️
+                </span>
+            </div>
+            ${imagenHTML}
+            <div class="incidencia-descripcion">${descripcionCorta}</div>
+            <div class="incidencia-no">${incidencia.no}</div>
+        `;
+    }
     
     // Agregar event listener para el botón de editar
     const editBtn = div.querySelector('.incidencia-editar');
@@ -707,6 +783,66 @@ function crearElementoIncidencia(incidencia, usuarioId, fecha) {
         });
     }
     
+    // Event listeners para tooltip en vista simple
+    if (estado.vistaSimple && tooltipId) {
+        div.addEventListener('mouseenter', (e) => {
+            const tooltip = document.getElementById(tooltipId);
+            if (tooltip) {
+                // Obtener posición del elemento
+                const rect = div.getBoundingClientRect();
+                
+                // Mostrar tooltip temporalmente fuera de pantalla para calcular dimensiones
+                tooltip.style.display = 'block';
+                tooltip.style.opacity = '0';
+                tooltip.style.top = '-9999px';
+                tooltip.style.left = '-9999px';
+                
+                // Forzar reflow para que el navegador calcule las dimensiones
+                void tooltip.offsetWidth;
+                
+                // Calcular dimensiones del tooltip
+                const tooltipRect = tooltip.getBoundingClientRect();
+                
+                // Posicionar arriba de la tarjeta, centrado
+                let top = rect.top - tooltipRect.height - 8;
+                let left = rect.left + (rect.width / 2) - (tooltipRect.width / 2);
+                
+                // Ajustar si se sale por la izquierda
+                if (left < 10) {
+                    left = 10;
+                }
+                
+                // Ajustar si se sale por la derecha
+                if (left + tooltipRect.width > window.innerWidth - 10) {
+                    left = window.innerWidth - tooltipRect.width - 10;
+                }
+                
+                // Ajustar si se sale por arriba
+                if (top < 10) {
+                    top = rect.bottom + 8; // Mostrar abajo en su lugar
+                }
+                
+                // Aplicar posición y mostrar con transición
+                tooltip.style.top = `${top}px`;
+                tooltip.style.left = `${left}px`;
+                // Usar setTimeout para permitir que el navegador aplique la posición antes de mostrar
+                setTimeout(() => {
+                    tooltip.style.opacity = '1';
+                }, 10);
+            }
+        });
+        
+        div.addEventListener('mouseleave', () => {
+            const tooltip = document.getElementById(tooltipId);
+            if (tooltip) {
+                tooltip.style.opacity = '0';
+                setTimeout(() => {
+                    tooltip.style.display = 'none';
+                }, 200); // Esperar a que termine la transición
+            }
+        });
+    }
+    
     // Event listeners para drag & drop
     div.addEventListener('dragstart', (e) => {
         e.dataTransfer.setData('text/plain', incidencia.no);
@@ -715,6 +851,14 @@ function crearElementoIncidencia(incidencia, usuarioId, fecha) {
             fecha: fecha
         }));
         div.classList.add('dragging');
+        // Ocultar tooltip al arrastrar
+        if (tooltipId) {
+            const tooltip = document.getElementById(tooltipId);
+            if (tooltip) {
+                tooltip.style.display = 'none';
+                tooltip.style.opacity = '0';
+            }
+        }
     });
     
     div.addEventListener('dragend', () => {
@@ -722,6 +866,21 @@ function crearElementoIncidencia(incidencia, usuarioId, fecha) {
     });
     
     return div;
+}
+
+// Toggle vista simple
+function toggleVistaSimple() {
+    estado.vistaSimple = !estado.vistaSimple;
+    const btn = document.getElementById('vista-simple-btn');
+    if (estado.vistaSimple) {
+        btn.textContent = '🖼️ Vista Normal';
+        btn.title = 'Cambiar a vista normal';
+    } else {
+        btn.textContent = '📋 Vista Simple';
+        btn.title = 'Cambiar a vista simple';
+    }
+    // Regenerar calendario para aplicar los cambios
+    generarCalendario();
 }
 
 // Mover incidencia
@@ -1018,6 +1177,9 @@ function mostrarIncidenciasLibres() {
 let detalleActual = null;
 let idGtaskActual = null;
 
+// Objeto para almacenar las rotaciones de las imágenes (URL -> grados: 0, 90, 180, 270)
+let rotacionesImagenes = {};
+
 // Abrir modal de detalle de incidencia
 async function abrirDetalleIncidencia(idGtask) {
     const modal = document.getElementById('detalle-modal');
@@ -1111,16 +1273,30 @@ function mostrarDetalleIncidencia(detalle) {
     let imagenesHTML = '';
     if (detalle.image && Array.isArray(detalle.image) && detalle.image.length > 0) {
         imagenesHTML = '<div class="detalle-imagenes"><h3>Imágenes:</h3><div class="galeria-imagenes">';
-        detalle.image.forEach(img => {
+        detalle.image.forEach((img, index) => {
             if (img.url) {
-                // Detectar si la imagen es vertical basándose en el nombre del archivo
+                // Obtener rotación guardada o usar la rotación por defecto
+                const rotacionGuardada = rotacionesImagenes[img.url] || 0;
                 const esVertical = esImagenVertical(img.url);
-                const claseRotacion = esVertical ? 'imagen-vertical-rotada' : '';
-                const claseContenedor = esVertical ? 'imagen-item-vertical' : '';
+                const rotacionInicial = esVertical ? 90 : 0;
+                const rotacionTotal = (rotacionInicial + rotacionGuardada) % 360;
+                
+                // Clase CSS para la rotación visual
+                let claseRotacion = '';
+                if (rotacionTotal === 90 || rotacionTotal === 270) {
+                    claseRotacion = 'imagen-vertical-rotada';
+                }
+                const claseContenedor = (rotacionTotal === 90 || rotacionTotal === 270) ? 'imagen-item-vertical' : '';
+                
+                // Estilo inline para la rotación exacta
+                const estiloRotacion = `transform: rotate(${rotacionTotal}deg);`;
+                
                 imagenesHTML += `
-                    <div class="imagen-item ${claseContenedor}">
+                    <div class="imagen-item ${claseContenedor}" data-image-url="${img.url}" data-image-index="${index}">
+                        <div class="imagen-rotar-btn" onclick="rotarImagen('${img.url}', event)" title="Rotar imagen 90°">🔄</div>
                         <img src="${img.url}" alt="${img.name || 'Imagen'}" 
                              class="${claseRotacion}" 
+                             style="${estiloRotacion}"
                              onclick="abrirImagenGrande('${img.url}')">
                     </div>
                 `;
@@ -1481,6 +1657,40 @@ function formatearEstado(state) {
 // Abrir imagen en tamaño grande
 function abrirImagenGrande(url) {
     window.open(url, '_blank');
+}
+
+// Rotar imagen 90 grados
+function rotarImagen(url, event) {
+    event.stopPropagation(); // Evitar que se abra la imagen grande
+    
+    // Obtener rotación actual o inicializar en 0
+    const rotacionActual = rotacionesImagenes[url] || 0;
+    const nuevaRotacion = (rotacionActual + 90) % 360;
+    rotacionesImagenes[url] = nuevaRotacion;
+    
+    // Buscar el elemento de imagen en el DOM
+    const imagenItem = event.target.closest('.imagen-item');
+    if (imagenItem) {
+        const img = imagenItem.querySelector('img');
+        if (img) {
+            // Obtener rotación inicial basada en si es vertical
+            const esVertical = esImagenVertical(url);
+            const rotacionInicial = esVertical ? 90 : 0;
+            const rotacionTotal = (rotacionInicial + nuevaRotacion) % 360;
+            
+            // Aplicar rotación visual
+            img.style.transform = `rotate(${rotacionTotal}deg)`;
+            
+            // Actualizar clases CSS si es necesario
+            if (rotacionTotal === 90 || rotacionTotal === 270) {
+                img.classList.add('imagen-vertical-rotada');
+                imagenItem.classList.add('imagen-item-vertical');
+            } else {
+                img.classList.remove('imagen-vertical-rotada');
+                imagenItem.classList.remove('imagen-item-vertical');
+            }
+        }
+    }
 }
 
 // Generar PDF con el detalle de la incidencia
@@ -1900,6 +2110,9 @@ function getImageOrientationFromFilename(url) {
 // Cargar imagen desde URL con sus dimensiones y orientación corregida
 function loadImageWithDimensions(url) {
     return new Promise((resolve, reject) => {
+        // Obtener rotación guardada por el usuario (0, 90, 180, 270)
+        const rotacionUsuario = rotacionesImagenes[url] || 0;
+        
         // Obtener orientación basándose en el nombre del archivo
         getImageOrientationFromFilename(url).then(({ orientation, isLandscape: isLandscapeFromFilename, needsVertical }) => {
             const img = new Image();
@@ -1914,52 +2127,63 @@ function loadImageWithDimensions(url) {
                     let displayWidth = img.width;
                     let displayHeight = img.height;
                     
-                    console.log(`[Orientación] Prefijo del archivo: orientación=${orientation}, isLandscape=${isLandscapeFromFilename}, needsVertical=${needsVertical}, Dimensiones display: ${displayWidth}x${displayHeight}`);
+                    console.log(`[Orientación] Prefijo del archivo: orientación=${orientation}, isLandscape=${isLandscapeFromFilename}, needsVertical=${needsVertical}, Rotación usuario: ${rotacionUsuario}°, Dimensiones display: ${displayWidth}x${displayHeight}`);
                     
-                    // Determinar dimensiones finales y si necesitamos rotar
-                    let finalWidth, finalHeight, needsRotation = false;
+                    // Determinar rotación inicial basada en el nombre del archivo
+                    let rotacionInicial = 0;
+                    let finalWidth = displayWidth;
+                    let finalHeight = displayHeight;
                     
                     if (needsVertical) {
                         // Debe mostrarse vertical (alto > ancho)
                         // Si actualmente está horizontal (ancho > alto), rotar 90°
                         if (displayWidth > displayHeight) {
-                            // Está horizontal, rotar para que sea vertical
-                            finalWidth = displayHeight;
-                            finalHeight = displayWidth;
-                            needsRotation = true;
+                            rotacionInicial = 90;
                             console.log(`[Orientación] Imagen con prefijo V_ está horizontal, rotando 90° para hacerla vertical`);
                         } else {
-                            // Ya está vertical, no rotar
-                            finalWidth = displayWidth;
-                            finalHeight = displayHeight;
                             console.log(`[Orientación] Imagen con prefijo V_ ya está vertical, no rotar`);
                         }
                     } else {
                         // Debe mostrarse horizontal (ancho > alto)
                         // Si actualmente está vertical (alto > ancho), rotar 90°
                         if (displayHeight > displayWidth) {
-                            // Está vertical, rotar para que sea horizontal
-                            finalWidth = displayHeight;
-                            finalHeight = displayWidth;
-                            needsRotation = true;
+                            rotacionInicial = 90;
                             console.log(`[Orientación] Imagen con prefijo H_ o sin prefijo está vertical, rotando 90° para hacerla horizontal`);
                         } else {
-                            // Ya está horizontal, no rotar
-                            finalWidth = displayWidth;
-                            finalHeight = displayHeight;
                             console.log(`[Orientación] Imagen con prefijo H_ o sin prefijo ya está horizontal, no rotar`);
                         }
+                    }
+                    
+                    // Calcular rotación total (inicial + usuario)
+                    const totalRotation = (rotacionInicial + rotacionUsuario) % 360;
+                    
+                    // Determinar dimensiones finales del canvas
+                    // Si la rotación total es 90 o 270, intercambiar dimensiones
+                    if (totalRotation === 90 || totalRotation === 270) {
+                        finalWidth = displayHeight;
+                        finalHeight = displayWidth;
+                    } else {
+                        finalWidth = displayWidth;
+                        finalHeight = displayHeight;
                     }
                     
                     canvas.width = finalWidth;
                     canvas.height = finalHeight;
                     
-                    // Aplicar rotación si es necesaria
-                    if (needsRotation) {
+                    // Aplicar rotación total
+                    if (totalRotation !== 0) {
                         ctx.save();
-                        // 90° horario
-                        ctx.translate(canvas.width, 0);
-                        ctx.rotate(Math.PI / 2);
+                        // Calcular el punto de rotación según el ángulo
+                        if (totalRotation === 90) {
+                            ctx.translate(canvas.width, 0);
+                            ctx.rotate(Math.PI / 2);
+                        } else if (totalRotation === 180) {
+                            ctx.translate(canvas.width, canvas.height);
+                            ctx.rotate(Math.PI);
+                        } else if (totalRotation === 270) {
+                            ctx.translate(0, canvas.height);
+                            ctx.rotate(-Math.PI / 2);
+                        }
                         ctx.drawImage(img, 0, 0, displayWidth, displayHeight);
                         ctx.restore();
                     } else {
@@ -1967,7 +2191,7 @@ function loadImageWithDimensions(url) {
                     }
                     
                     const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
-                    console.log(`[Orientación] Imagen final: ${canvas.width}x${canvas.height}, rotada: ${needsRotation}, isLandscape: ${isLandscapeFromFilename}`);
+                    console.log(`[Orientación] Imagen final: ${canvas.width}x${canvas.height}, rotación total: ${totalRotation}°, isLandscape: ${isLandscapeFromFilename}`);
                     
                     resolve({
                         dataUrl: dataUrl,
@@ -1988,20 +2212,51 @@ function loadImageWithDimensions(url) {
             img.src = url;
         }).catch(error => {
             console.warn('[Orientación] Error obteniendo orientación, usando fallback:', error);
-            // Fallback: cargar imagen sin rotación
+            // Fallback: cargar imagen aplicando solo la rotación del usuario
             const img = new Image();
             img.crossOrigin = 'anonymous';
             
             img.onload = () => {
                 try {
                     const canvas = document.createElement('canvas');
-                    canvas.width = img.width;
-                    canvas.height = img.height;
                     const ctx = canvas.getContext('2d');
-                    ctx.drawImage(img, 0, 0);
+                    
+                    let displayWidth = img.width;
+                    let displayHeight = img.height;
+                    let finalWidth = displayWidth;
+                    let finalHeight = displayHeight;
+                    
+                    // Aplicar rotación del usuario
+                    if (rotacionUsuario === 90 || rotacionUsuario === 270) {
+                        finalWidth = displayHeight;
+                        finalHeight = displayWidth;
+                    }
+                    
+                    canvas.width = finalWidth;
+                    canvas.height = finalHeight;
+                    
+                    // Aplicar rotación si es necesaria
+                    if (rotacionUsuario !== 0) {
+                        ctx.save();
+                        if (rotacionUsuario === 90) {
+                            ctx.translate(canvas.width, 0);
+                            ctx.rotate(Math.PI / 2);
+                        } else if (rotacionUsuario === 180) {
+                            ctx.translate(canvas.width, canvas.height);
+                            ctx.rotate(Math.PI);
+                        } else if (rotacionUsuario === 270) {
+                            ctx.translate(0, canvas.height);
+                            ctx.rotate(-Math.PI / 2);
+                        }
+                        ctx.drawImage(img, 0, 0, displayWidth, displayHeight);
+                        ctx.restore();
+                    } else {
+                        ctx.drawImage(img, 0, 0, displayWidth, displayHeight);
+                    }
+                    
                     const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
                     // Determinar orientación por dimensiones (fallback)
-                    const isLandscape = img.width > img.height;
+                    const isLandscape = canvas.width > canvas.height;
                     resolve({
                         dataUrl: dataUrl,
                         width: img.width,
