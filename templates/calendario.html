@@ -124,6 +124,7 @@
             <div class="sidebar-section">
                 <div class="sidebar-buttons">
                     <button id="refrescar-btn" class="btn-sidebar">🔄 Refrescar</button>
+                    <button id="vista-simple-btn" class="btn-sidebar btn-vista-simple" title="Cambiar a vista simple">📋 Vista Simple</button>
                     <button id="filtro-usuarios-btn" class="btn-sidebar btn-filtro">🔍 Filtrar Usuarios</button>
                     <button id="asignar-automatico-btn" class="btn-sidebar btn-asignar-auto">🤖 Asignar Automáticamente</button>
                     <button id="reasignar-automatico-btn" class="btn-sidebar btn-reasignar-auto">🔄 Reasignar Automáticamente</button>
@@ -134,7 +135,9 @@
         <!-- Contenido principal -->
         <div class="main-container">
             <div class="controls">
+                <button id="semana-anterior-btn" class="btn-nav-semana" title="Semana anterior">◀</button>
                 <h2 id="semana-actual"></h2>
+                <button id="semana-siguiente-btn" class="btn-nav-semana" title="Semana siguiente">▶</button>
             </div>
             <!-- Panel de filtro de usuarios -->
             <div id="filtro-usuarios-panel" class="filtro-panel" style="display: none;">

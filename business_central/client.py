@@ -348,7 +348,7 @@ class BusinessCentralClient:
             print(f"Params: {params}")
             print(f"Incidencia No.: {incidencia.no}")
             print(f"Id_Gtask: {incidencia.id_gtask}")
-            print(f"Usuario ID: {incidencia.usuario}")
+            print(f"Recurso: {incidencia.recurso}")
             print(f"Fecha: {fecha_str}")
             print(f"Timeout: {timeout}s")
             print("==============================================================")
@@ -368,7 +368,7 @@ class BusinessCentralClient:
                 print(f"✅ Incidencia actualizada correctamente en BC: {response.text}")
                 return True
             else:
-                print(f"❌ Error al actualizar incidencia en BC. Código: {response.status_code}")
+                print(f"❌ zar incidencia en BC. Código: {response.status_code}")
                 print(f"❌ Respuesta completa: {response.text}")
                 print(f"❌ URL que falló: {url}")
                 return False
