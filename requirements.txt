@@ -14,3 +14,6 @@ Flask>=3.0.0
 # Conexión a SQL Server
 pyodbc>=5.0.0
 
+# Servidor WSGI para producción (IIS)
+waitress>=2.1.2
+
