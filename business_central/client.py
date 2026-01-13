@@ -157,7 +157,9 @@ class BusinessCentralClient:
                             usuario_id = id_gtask_usuario
                         else:
                             usuario_id = None  # Sin usuario asignado
-                        
+                        id_tarea_gtask = inc_data.get("ID_Tarea_Gtask", "")
+                        if id_tarea_gtask=="":
+                            usuario_id = None # Sin usuario asignado
                         incidencia_dict = {
                             "No.": inc_data.get("No", ""),
                             "Descripción": inc_data.get("Descripción", ""),
@@ -168,6 +170,7 @@ class BusinessCentralClient:
                             "Fecha": fecha.isoformat() if fecha else None,
                             "Usuario": usuario_id,  # Usar Id_Uduario_Gtask si está disponible
                             "Id_Gtask": inc_data.get("Id_Gtask", ""),  # Id_Gtask desde OData
+                            "ID_Tarea_Gtask": inc_data.get("ID_Tarea_Gtask", ""),
                             "URL_Primera_Imagen": inc_data.get("URL_Primera_Imagen", "")  # URL de la primera imagen
                         }
                         

@@ -555,6 +555,7 @@ body {
     width: 100%;
     border-collapse: collapse;
     background: white;
+    border-spacing: 0;
 }
 
 .calendario-tabla th {
@@ -592,7 +593,7 @@ body {
 
 .calendario-tabla td {
     border: 1px solid #e0e0e0;
-    padding: 10px;
+    padding: 4px;
     vertical-align: top;
     min-height: 100px;
     position: relative;
@@ -605,11 +606,195 @@ body {
     left: 0;
     z-index: 5;
     background: #f9f9f9;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 1px 6px;
+    line-height: 2.8;
+    font-size: 0.85em;
+    border-top: 1px solid #e0e0e0;
+    border-bottom: 1px solid #e0e0e0;
+    min-height: auto;
+    height: auto;
+}
+
+/* Botón de toggle para usuarios plegados */
+.btn-toggle-usuario {
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    font-size: 0.7em;
+    color: #666;
+    padding: 0 2px;
+    transition: transform 0.2s;
+    flex-shrink: 0;
+    line-height: 1;
+}
+
+.btn-toggle-usuario:hover {
+    color: var(--malla-red);
+    transform: scale(1.2);
+}
+
+/* Usuarios plegados */
+.calendario-tabla tr.usuario-plegado td.celda-dia {
+    display: none;
+}
+
+.calendario-tabla tr.usuario-plegado {
+    opacity: 0.7;
+}
+
+.calendario-tabla tr.usuario-plegado:hover {
+    opacity: 1;
+}
+
+.calendario-tabla tr.usuario-plegado td.celda-usuario {
+    padding: 0 6px;
+    border-top: 0.5px solid #e0e0e0;
+    border-bottom: 0.5px solid #e0e0e0;
+    min-height: 0;
+    height: auto;
+    line-height: 2.8;
 }
 
 .calendario-tabla td.celda-dia {
     min-height: 120px;
     background: #fafafa;
+    position: relative;
+}
+
+/* Estructura de horas en vista simple */
+.celda-dia-horas {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    min-height: 210px; /* 7 horas * 30px aproximadamente - reducido */
+}
+
+.celda-hora {
+    flex: 0 0 auto;
+    min-height: 40px;
+    height: auto;
+    border-bottom: 1px solid #e0e0e0;
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    padding: 3px 4px;
+    gap: 2px;
+}
+
+.celda-hora.hora-actual {
+    border-bottom: 2px solid var(--malla-red);
+}
+
+.celda-hora.hora-actual::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 50%;
+    height: 1px;
+    background-color: var(--malla-red);
+    z-index: 2;
+}
+
+.celda-hora:last-child {
+    border-bottom: none;
+}
+
+.celda-hora.drag-over {
+    background: #e3f2fd;
+    border: 2px solid #2196f3;
+}
+
+.hora-label {
+    font-size: 0.7em;
+    font-weight: bold;
+    color: #2196F3; /* Azul */
+    padding: 0;
+    background: transparent;
+    border-radius: 0;
+    width: 35px;
+    flex-shrink: 0;
+    text-align: left;
+    line-height: 1;
+    min-height: auto;
+    font-family: 'Courier New', Courier, monospace; /* Fuente monospace para ancho uniforme */
+}
+
+.hora-label.hora-actual-label {
+    color: var(--malla-red);
+    font-weight: bold;
+}
+
+.linea-media-hora {
+    position: absolute;
+    left: 10%;
+    right: 0;
+    width: 80%;
+    top: 50%;
+    height: 1px;
+    background-color: transparent;
+    border-top: 1px dashed #d0d0d0;
+    z-index: 1;
+    pointer-events: none;
+}
+
+.celda-hora.hora-actual .linea-media-hora {
+    display: none; /* Ocultar línea punteada cuando es la hora actual */
+}
+
+.incidencias-hora-container {
+    flex: 1;
+    position: relative;
+    min-height: auto;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    flex-wrap: nowrap;
+    gap: 2px;
+    align-items: stretch;
+    overflow-x: visible;
+}
+
+/* Ajustes para incidencias en vista simple con horas */
+.celda-hora .incidencia-simple {
+    margin: 0;
+    width: 100%;
+    max-width: 100%;
+    flex-shrink: 0;
+}
+
+.celda-hora .incidencia-simple-box {
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+    padding: 4px 6px;
+    margin: 0;
+    white-space: nowrap;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    overflow: hidden;
+}
+
+.celda-hora .incidencia-simple-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 0;
+    flex-wrap: nowrap;
+    flex-shrink: 0;
+}
+
+.celda-hora .incidencia-simple-descripcion {
+    display: inline;
+    margin: 0;
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .calendario-tabla td.celda-dia.hoy {
@@ -646,10 +831,11 @@ body {
     font-size: 0.75em;
     border: none;
     min-height: auto;
-    display: flex;
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 0;
+    display: inline-flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 4px;
+    width: auto;
 }
 
 .incidencia-hora-container {
@@ -674,10 +860,14 @@ body {
 .incidencia-simple-box {
     background: #f5f5f5;
     color: #333;
-    padding: 6px 8px;
+    padding: 4px 6px;
     border-radius: 4px;
-    width: 100%;
+    width: auto;
     border: 1px solid #ddd;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    white-space: nowrap;
 }
 
 /* Colores de tipos en vista simple - aplicados al cuadro */
@@ -721,13 +911,64 @@ body {
     border-color: #e0e0e0;
 }
 
+/* Colores adicionales para vista simple */
+.incidencia-simple.tipo-1 .incidencia-simple-box {
+    background: #ffe0b2;
+    border-color: #ffb74d;
+}
+
+.incidencia-simple.tipo-2 .incidencia-simple-box {
+    background: #c8e6c9;
+    border-color: #81c784;
+}
+
+.incidencia-simple.tipo-3 .incidencia-simple-box {
+    background: #e1f5fe;
+    border-color: #64b5f6;
+}
+
+.incidencia-simple.tipo-4 .incidencia-simple-box {
+    background: #f3e5f5;
+    border-color: #ba68c8;
+}
+
+.incidencia-simple.tipo-5 .incidencia-simple-box {
+    background: #fce4ec;
+    border-color: #f06292;
+}
+
+.incidencia-simple.tipo-6 .incidencia-simple-box {
+    background: #e0f2f1;
+    border-color: #4db6ac;
+}
+
+.incidencia-simple.tipo-7 .incidencia-simple-box {
+    background: #fff9c4;
+    border-color: #ffd54f;
+}
+
+.incidencia-simple.tipo-8 .incidencia-simple-box {
+    background: #efebe9;
+    border-color: #a1887f;
+}
+
+.incidencia-simple.tipo-9 .incidencia-simple-box {
+    background: #eceff1;
+    border-color: #78909c;
+}
+
+.incidencia-simple.tipo-10 .incidencia-simple-box {
+    background: #ffebee;
+    border-color: #ef5350;
+}
+
 
 .incidencia-simple-header {
-    display: flex;
+    display: inline-flex;
     align-items: center;
     gap: 6px;
-    flex-wrap: wrap;
-    margin-bottom: 4px;
+    flex-wrap: nowrap;
+    margin-bottom: 0;
 }
 
 .incidencia-simple-no {
@@ -744,7 +985,7 @@ body {
 }
 
 .incidencia-simple .incidencia-editar {
-    margin-left: auto;
+    margin-left: 0;
     font-size: 0.85em;
     opacity: 0.6;
     flex-shrink: 0;
@@ -762,9 +1003,9 @@ body {
     line-height: 1.3;
     overflow: hidden;
     text-overflow: ellipsis;
-    display: -webkit-box;
-    -webkit-line-clamp: 1;
-    -webkit-box-orient: vertical;
+    display: inline;
+    white-space: nowrap;
+    max-width: 200px;
 }
 
 .incidencia-header {
@@ -839,6 +1080,57 @@ body {
 .incidencia.tipo-default {
     background: #e0e0e0; /* Gris claro por defecto */
     color: #424242;
+}
+
+/* Colores adicionales para más tipos de incidencia */
+.incidencia.tipo-1 {
+    background: #ffb74d; /* Naranja */
+    color: #5d4037;
+}
+
+.incidencia.tipo-2 {
+    background: #81c784; /* Verde claro */
+    color: #1b5e20;
+}
+
+.incidencia.tipo-3 {
+    background: #64b5f6; /* Azul claro */
+    color: #0d47a1;
+}
+
+.incidencia.tipo-4 {
+    background: #ba68c8; /* Púrpura */
+    color: #4a148c;
+}
+
+.incidencia.tipo-5 {
+    background: #f06292; /* Rosa */
+    color: #880e4f;
+}
+
+.incidencia.tipo-6 {
+    background: #4db6ac; /* Turquesa */
+    color: #004d40;
+}
+
+.incidencia.tipo-7 {
+    background: #ffd54f; /* Amarillo */
+    color: #5d4037;
+}
+
+.incidencia.tipo-8 {
+    background: #a1887f; /* Marrón */
+    color: #3e2723;
+}
+
+.incidencia.tipo-9 {
+    background: #78909c; /* Azul gris */
+    color: #263238;
+}
+
+.incidencia.tipo-10 {
+    background: #ef5350; /* Rojo claro */
+    color: #b71c1c;
 }
 
 .incidencia-miniatura {

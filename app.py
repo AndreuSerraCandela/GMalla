@@ -263,6 +263,7 @@ def mover_incidencia():
         no_incidencia = data.get('no')
         nuevo_usuario_id = data.get('nuevo_usuario_id')
         nueva_fecha_str = data.get('nueva_fecha')
+        nueva_fecha_hora_str = data.get('nueva_fecha_hora')
         
         if not no_incidencia:
             return jsonify({
@@ -288,6 +289,25 @@ def mover_incidencia():
         nueva_fecha = None
         if nueva_fecha_str:
             nueva_fecha = date.fromisoformat(nueva_fecha_str)
+        
+        # Actualizar fecha_hora si se proporciona
+        if nueva_fecha_hora_str:
+            try:
+                from datetime import datetime
+                # Parsear fecha_hora desde formato ISO
+                nueva_fecha_hora = datetime.fromisoformat(nueva_fecha_hora_str.replace('Z', '+00:00'))
+                # Si hay zona horaria, convertir a local
+                if nueva_fecha_hora.tzinfo:
+                    nueva_fecha_hora = nueva_fecha_hora.replace(tzinfo=None)
+                incidencia.fecha_hora = nueva_fecha_hora
+                # También actualizar la fecha si no se proporcionó explícitamente
+                if not nueva_fecha:
+                    nueva_fecha = nueva_fecha_hora.date()
+            except Exception as e:
+                return jsonify({
+                    'success': False,
+                    'error': f'Error al parsear fecha_hora: {str(e)}'
+                }), 400
         
         # Mover la incidencia
         exito = gestor.mover_incidencia(

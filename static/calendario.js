@@ -369,8 +369,13 @@ function ajustarFechaFinSemana(fechaStr) {
 function organizarIncidencias() {
     estado.asignaciones = {};
     
-    // Organizar incidencias (solo las que tienen usuario válido)
+    // Organizar incidencias (solo las que tienen usuario válido Y tienen id_gtask)
     estado.incidencias.forEach(incidencia => {
+        // Si no tiene id_gtask, tratarla como no asignada (no organizarla)
+        if (!incidencia.id_gtask || incidencia.id_gtask === null || incidencia.id_gtask === undefined || String(incidencia.id_gtask).trim() === '') {
+            return; // Saltar esta incidencia, se mostrará como no asignada
+        }
+        
         const usuarioId = incidencia.usuario;
         // Verificar que el usuario existe y no está vacío
         if (usuarioId && usuarioId !== null && usuarioId !== undefined && String(usuarioId).trim() !== '') {
@@ -403,7 +408,7 @@ function organizarIncidencias() {
             
             estado.asignaciones[usuarioId][fecha].push(incidencia);
         }
-        // Las incidencias sin usuario se mostrarán en "incidencias sin asignar"
+        // Las incidencias sin usuario o sin id_gtask se mostrarán en "incidencias sin asignar"
     });
     
     console.log('📊 Incidencias organizadas:', Object.keys(estado.asignaciones).length, 'usuarios con asignaciones');
@@ -513,10 +518,71 @@ function generarCalendario() {
             const usuarioId = String(usuario.id || usuario.user_id || usuario.userId || usuario._id || JSON.stringify(usuario));
             const nombreUsuario = usuario.name || usuario.username || usuario.nombre || `Usuario ${usuarioId.substring(0, 8)}`;
             
+            // Verificar si el usuario tiene incidencias en la semana
+            const usuarioIdNormalizado = String(usuarioId);
+            let tieneIncidencias = false;
+            const fechasSemana = [];
+            for (let i = 0; i < 5; i++) {
+                const fechaInicio = estado.fechaInicioSemana;
+                const año = fechaInicio.getUTCFullYear();
+                const mes = fechaInicio.getUTCMonth();
+                const dia = fechaInicio.getUTCDate();
+                const fecha = new Date(Date.UTC(año, mes, dia + i));
+                const fechaStr = fecha.toISOString().split('T')[0];
+                fechasSemana.push(fechaStr);
+                
+                // Verificar si hay incidencias para este usuario y fecha
+                if (estado.asignaciones[usuarioIdNormalizado] && estado.asignaciones[usuarioIdNormalizado][fechaStr]) {
+                    const incidenciasDia = estado.asignaciones[usuarioIdNormalizado][fechaStr].filter(inc => debeMostrarIncidencia(inc));
+                    if (incidenciasDia.length > 0) {
+                        tieneIncidencias = true;
+                    }
+                }
+                
+                // También buscar por otros formatos de ID
+                Object.keys(estado.asignaciones).forEach(key => {
+                    if (key === usuarioIdNormalizado) return;
+                    if (estado.asignaciones[key] && estado.asignaciones[key][fechaStr]) {
+                        estado.asignaciones[key][fechaStr].forEach(incidencia => {
+                            const incUsuarioId = String(incidencia.usuario || '');
+                            if ((incUsuarioId === usuarioIdNormalizado || 
+                                incUsuarioId.includes(usuarioIdNormalizado) ||
+                                usuarioIdNormalizado.includes(incUsuarioId)) && 
+                                debeMostrarIncidencia(incidencia)) {
+                                tieneIncidencias = true;
+                            }
+                        });
+                    }
+                });
+            }
+            
+            // Si no tiene incidencias, marcar como plegado
+            if (!tieneIncidencias) {
+                tr.classList.add('usuario-plegado');
+                tr.dataset.usuarioId = usuarioId;
+            }
+            
             // Celda de usuario
             const tdUsuario = document.createElement('td');
             tdUsuario.className = 'celda-usuario';
-            tdUsuario.textContent = nombreUsuario;
+            
+            // Si no tiene incidencias, agregar botón de desplegar/plegar
+            if (!tieneIncidencias) {
+                const btnToggle = document.createElement('button');
+                btnToggle.className = 'btn-toggle-usuario';
+                btnToggle.innerHTML = '▶';
+                btnToggle.title = 'Desplegar usuario';
+                btnToggle.addEventListener('click', () => {
+                    tr.classList.toggle('usuario-plegado');
+                    btnToggle.innerHTML = tr.classList.contains('usuario-plegado') ? '▶' : '▼';
+                    btnToggle.title = tr.classList.contains('usuario-plegado') ? 'Desplegar usuario' : 'Plegar usuario';
+                });
+                tdUsuario.appendChild(btnToggle);
+            }
+            
+            const nombreSpan = document.createElement('span');
+            nombreSpan.textContent = nombreUsuario;
+            tdUsuario.appendChild(nombreSpan);
             tr.appendChild(tdUsuario);
             
             // Celdas de días (solo 5 días: lunes a viernes)
@@ -579,43 +645,213 @@ function generarCalendario() {
                 }
             });
             
-            // Ordenar por hora si está en vista simple
+            // Si está en vista simple, crear estructura con horas
             if (estado.vistaSimple) {
-                incidenciasParaAgregar.sort((a, b) => {
-                    const horaA = a.fecha_hora ? new Date(a.fecha_hora).getTime() : 0;
-                    const horaB = b.fecha_hora ? new Date(b.fecha_hora).getTime() : 0;
-                    return horaA - horaB;
+                // Crear contenedor de horas
+                const horasContainer = document.createElement('div');
+                horasContainer.className = 'celda-dia-horas';
+                
+                // Definir horas: 6:30, 7:30, 8:30, 9:30, 10:30, 11:30, 12:30
+                const horas = [6.5, 7.5, 8.5, 9.5, 10.5, 11.5, 12.5]; // En formato decimal (6.5 = 6:30)
+                
+                // Obtener hora actual para marcar en rojo
+                const ahora = new Date();
+                const esHoy = fechaStr === hoyStr;
+                const horaActual = ahora.getHours() + ahora.getMinutes() / 60;
+                const minutosActuales = ahora.getMinutes();
+                
+                horas.forEach((horaDecimal, index) => {
+                    const horaDiv = document.createElement('div');
+                    horaDiv.className = 'celda-hora';
+                    horaDiv.dataset.hora = horaDecimal;
+                    horaDiv.dataset.usuario = usuarioId;
+                    horaDiv.dataset.fecha = fechaStr;
+                    
+                    // Verificar si es la hora actual (dentro del rango de esta hora)
+                    const horasEnteras = Math.floor(horaDecimal);
+                    const esHoraActual = esHoy && 
+                        horaActual >= (horaDecimal - 0.5) && 
+                        horaActual < (horaDecimal + 0.5);
+                    
+                    if (esHoraActual) {
+                        horaDiv.classList.add('hora-actual');
+                    }
+                    
+                    // Etiqueta de hora (solo la hora, sin minutos para formato compacto)
+                    const horaLabel = document.createElement('div');
+                    horaLabel.className = 'hora-label';
+                    if (esHoraActual) {
+                        horaLabel.classList.add('hora-actual-label');
+                        // Mostrar hora completa con minutos si es la hora actual
+                        horaLabel.textContent = `${String(horasEnteras).padStart(2, '0')}:${String(minutosActuales).padStart(2, '0')}`;
+                    } else {
+                        horaLabel.textContent = String(horasEnteras).padStart(2, '0');
+                    }
+                    horaDiv.appendChild(horaLabel);
+                    
+                    // Línea divisoria para la media hora (en la mitad de cada celda)
+                    const lineaMediaHora = document.createElement('div');
+                    lineaMediaHora.className = 'linea-media-hora';
+                    horaDiv.appendChild(lineaMediaHora);
+                    
+                    // Contenedor para incidencias de esta hora
+                    const incidenciasContainer = document.createElement('div');
+                    incidenciasContainer.className = 'incidencias-hora-container';
+                    horaDiv.appendChild(incidenciasContainer);
+                    
+                    // Agregar incidencias que corresponden a esta hora
+                    incidenciasParaAgregar.forEach(incidencia => {
+                        let horaIncidencia = null;
+                        if (incidencia.fecha_hora) {
+                            try {
+                                const fechaHora = new Date(incidencia.fecha_hora);
+                                horaIncidencia = fechaHora.getHours() + fechaHora.getMinutes() / 60;
+                            } catch (e) {
+                                // Error al parsear
+                            }
+                        }
+                        
+                        // Si la incidencia tiene hora
+                        if (horaIncidencia !== null) {
+                            // Si la hora es mayor a 12:30, ponerla en la última hora (12:30)
+                            if (horaIncidencia > 12.5) {
+                                // Solo agregar en la última hora (índice 6, que es 12:30)
+                                if (index === horas.length - 1) {
+                                    const incDiv = crearElementoIncidencia(incidencia, usuarioIdNormalizado, fechaStr);
+                                    incidenciasContainer.appendChild(incDiv);
+                                }
+                            } else {
+                                // Si está dentro del rango de esta hora (con margen de 30 min)
+                                const horaInicio = horaDecimal - 0.5; // 30 min antes
+                                const horaFin = horaDecimal + 0.5; // 30 min después
+                                if (horaIncidencia >= horaInicio && horaIncidencia < horaFin) {
+                                    const incDiv = crearElementoIncidencia(incidencia, usuarioIdNormalizado, fechaStr);
+                                    incidenciasContainer.appendChild(incDiv);
+                                }
+                            }
+                        }
+                    });
+                    
+                    // Agregar incidencias sin hora al final de la primera hora (6:30)
+                    if (index === 0) {
+                        incidenciasParaAgregar.forEach(incidencia => {
+                            if (!incidencia.fecha_hora) {
+                                // Verificar que no se haya agregado ya
+                                const yaAgregada = Array.from(incidenciasContainer.children).some(
+                                    child => child.dataset.no === incidencia.no
+                                );
+                                if (!yaAgregada) {
+                                    const incDiv = crearElementoIncidencia(incidencia, usuarioIdNormalizado, fechaStr);
+                                    incidenciasContainer.appendChild(incDiv);
+                                }
+                            }
+                        });
+                    }
+                    
+                    // Hacer la celda de hora droppable
+                    horaDiv.addEventListener('dragover', (e) => {
+                        e.preventDefault();
+                        horaDiv.classList.add('drag-over');
+                        
+                        // Si el usuario está plegado, desplegarlo automáticamente
+                        if (tr.classList.contains('usuario-plegado')) {
+                            tr.classList.remove('usuario-plegado');
+                            const btnToggle = tdUsuario.querySelector('.btn-toggle-usuario');
+                            if (btnToggle) {
+                                btnToggle.innerHTML = '▼';
+                                btnToggle.title = 'Plegar usuario';
+                            }
+                        }
+                    });
+                    
+                    horaDiv.addEventListener('dragleave', () => {
+                        horaDiv.classList.remove('drag-over');
+                    });
+                    
+                    horaDiv.addEventListener('drop', (e) => {
+                        e.preventDefault();
+                        horaDiv.classList.remove('drag-over');
+                        
+                        const incidenciaNo = e.dataTransfer.getData('text/plain');
+                        const datos = JSON.parse(e.dataTransfer.getData('application/json') || '{}');
+                        
+                        // Calcular la hora basándose en la posición Y dentro de la celda de hora
+                        const rect = horaDiv.getBoundingClientRect();
+                        const y = e.clientY - rect.top;
+                        const alturaHora = rect.height;
+                        const porcentaje = Math.max(0, Math.min(1, y / alturaHora));
+                        
+                        // Calcular hora exacta (dentro del rango de esta hora)
+                        const horaInicio = horaDecimal - 0.5;
+                        const horaCalculada = horaInicio + (porcentaje * 1.0); // Rango de 1 hora
+                        
+                        // Crear nueva fecha_hora
+                        const nuevaFechaHora = new Date(fecha);
+                        nuevaFechaHora.setUTCHours(Math.floor(horaCalculada), Math.round((horaCalculada % 1) * 60), 0, 0);
+                        
+                        moverIncidenciaConHora(incidenciaNo, datos.usuarioId, datos.fecha, usuarioId, fechaStr, nuevaFechaHora.toISOString());
+                    });
+                    
+                    horasContainer.appendChild(horaDiv);
+                });
+                
+                td.appendChild(horasContainer);
+            } else {
+                // Vista normal: agregar incidencias directamente
+                incidenciasParaAgregar.forEach(incidencia => {
+                    const incDiv = crearElementoIncidencia(incidencia, usuarioIdNormalizado, fechaStr);
+                    td.appendChild(incDiv);
+                });
+                
+                // Hacer la celda droppable
+                td.addEventListener('dragover', (e) => {
+                    e.preventDefault();
+                    td.classList.add('drag-over');
+                    
+                    // Si el usuario está plegado, desplegarlo automáticamente
+                    if (tr.classList.contains('usuario-plegado')) {
+                        tr.classList.remove('usuario-plegado');
+                        const btnToggle = tdUsuario.querySelector('.btn-toggle-usuario');
+                        if (btnToggle) {
+                            btnToggle.innerHTML = '▼';
+                            btnToggle.title = 'Plegar usuario';
+                        }
+                    }
+                });
+                
+                td.addEventListener('dragleave', () => {
+                    td.classList.remove('drag-over');
+                });
+                
+                td.addEventListener('drop', (e) => {
+                    e.preventDefault();
+                    td.classList.remove('drag-over');
+                    
+                    const incidenciaNo = e.dataTransfer.getData('text/plain');
+                    const datos = JSON.parse(e.dataTransfer.getData('application/json') || '{}');
+                    
+                    moverIncidencia(incidenciaNo, datos.usuarioId, datos.fecha, usuarioId, fechaStr);
                 });
             }
             
-            // Agregar incidencias ordenadas
-            incidenciasParaAgregar.forEach(incidencia => {
-                const incDiv = crearElementoIncidencia(incidencia, usuarioIdNormalizado, fechaStr);
-                td.appendChild(incDiv);
-            });
-            
-            // Hacer la celda droppable
-            td.addEventListener('dragover', (e) => {
-                e.preventDefault();
-                td.classList.add('drag-over');
-            });
-            
-            td.addEventListener('dragleave', () => {
-                td.classList.remove('drag-over');
-            });
-            
-            td.addEventListener('drop', (e) => {
-                e.preventDefault();
-                td.classList.remove('drag-over');
-                
-                const incidenciaNo = e.dataTransfer.getData('text/plain');
-                const datos = JSON.parse(e.dataTransfer.getData('application/json') || '{}');
-                
-                moverIncidencia(incidenciaNo, datos.usuarioId, datos.fecha, usuarioId, fechaStr);
-            });
-            
             tr.appendChild(td);
         }
+        
+        // Agregar listener de dragover en la fila completa para desplegar automáticamente
+        // cuando se arrastra sobre cualquier parte de la fila, incluso si está plegada
+        tr.addEventListener('dragover', (e) => {
+            // Solo procesar si la fila está plegada
+            if (tr.classList.contains('usuario-plegado')) {
+                e.preventDefault();
+                // Desplegar automáticamente
+                tr.classList.remove('usuario-plegado');
+                const btnToggle = tdUsuario.querySelector('.btn-toggle-usuario');
+                if (btnToggle) {
+                    btnToggle.innerHTML = '▼';
+                    btnToggle.title = 'Plegar usuario';
+                }
+            }
+        });
         
         tbody.appendChild(tr);
     });
@@ -652,37 +888,135 @@ function debeMostrarIncidencia(incidencia) {
     return tipoSeleccionado;
 }
 
+// Caché para tipos ya mapeados (mejora el rendimiento)
+const cacheTiposColores = {};
+
+// Función para normalizar texto (eliminar acentos, espacios, convertir a minúsculas)
+function normalizarTexto(texto) {
+    if (!texto) return '';
+    return String(texto)
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '') // Eliminar acentos
+        .trim()
+        .replace(/\s+/g, ' '); // Normalizar espacios
+}
+
 // Función para obtener color según tipo de incidencia
 function obtenerColorPorTipo(tipoIncidencia) {
-    if (!tipoIncidencia) return 'tipo-default';
+    // Si no hay tipo, usar default
+    if (!tipoIncidencia || String(tipoIncidencia).trim() === '') {
+        return 'tipo-default';
+    }
     
     // Normalizar el tipo de incidencia para comparación
-    const tipo = String(tipoIncidencia).toLowerCase().trim();
+    const tipoNormalizado = normalizarTexto(tipoIncidencia);
     
-    // Mapeo de tipos de incidencia a clases CSS
+    // Verificar si ya está en caché
+    if (cacheTiposColores[tipoNormalizado]) {
+        return cacheTiposColores[tipoNormalizado];
+    }
+    
+    // Mapeo completo de tipos de incidencia a clases CSS
+    // Se busca coincidencia exacta primero, luego parcial
     const mapeoTipos = {
+        // EMT - múltiples variantes
         'incidencias emt': 'tipo-emt',
+        'incidencia emt': 'tipo-emt',
         'emt': 'tipo-emt',
+        
+        // Mantenimiento
         'mantenimiento': 'tipo-mantenimiento',
+        'mantenimientos': 'tipo-mantenimiento',
+        
+        // Reparación
         'reparación': 'tipo-reparacion',
         'reparacion': 'tipo-reparacion',
+        'reparaciones': 'tipo-reparacion',
+        
+        // Instalación
         'instalación': 'tipo-instalacion',
         'instalacion': 'tipo-instalacion',
+        'instalaciones': 'tipo-instalacion',
+        
+        // Revisión
         'revisión': 'tipo-revision',
         'revision': 'tipo-revision',
+        'revisiones': 'tipo-revision',
+        
+        // Limpieza
         'limpieza': 'tipo-limpieza',
+        'limpiezas': 'tipo-limpieza',
+        
+        // Otras
         'otras': 'tipo-otras',
-        'otra': 'tipo-otras'
+        'otra': 'tipo-otras',
+        'otros': 'tipo-otras',
+        'otro': 'tipo-otras'
     };
     
-    // Buscar coincidencia exacta o parcial
-    for (const [key, className] of Object.entries(mapeoTipos)) {
-        if (tipo.includes(key) || key.includes(tipo)) {
+    // Primero buscar coincidencia exacta
+    if (mapeoTipos[tipoNormalizado]) {
+        cacheTiposColores[tipoNormalizado] = mapeoTipos[tipoNormalizado];
+        return mapeoTipos[tipoNormalizado];
+    }
+    
+    // Luego buscar coincidencia parcial (el tipo contiene la clave o viceversa)
+    // Ordenar por longitud de clave (más largas primero) para mejor coincidencia
+    const clavesOrdenadas = Object.keys(mapeoTipos).sort((a, b) => b.length - a.length);
+    for (const key of clavesOrdenadas) {
+        if (tipoNormalizado.includes(key) || key.includes(tipoNormalizado)) {
+            const className = mapeoTipos[key];
+            cacheTiposColores[tipoNormalizado] = className;
             return className;
         }
     }
     
-    return 'tipo-default';
+    // Si no hay coincidencia, SIEMPRE generar un color único basado en el hash del tipo
+    // Esto asegura que cada tipo tenga un color consistente y único
+    // NUNCA devolvemos 'tipo-default' para tipos válidos
+    const colorGenerado = generarClaseColorPorHash(tipoNormalizado);
+    cacheTiposColores[tipoNormalizado] = colorGenerado;
+    return colorGenerado;
+}
+
+// Función para generar una clase de color única basada en el hash del tipo
+// Esto asegura que tipos desconocidos tengan un color consistente y único
+function generarClaseColorPorHash(tipo) {
+    // Lista completa de clases de color disponibles
+    // Incluye los tipos específicos y los tipos genéricos (tipo-1 a tipo-10)
+    const clasesDisponibles = [
+        'tipo-emt',
+        'tipo-mantenimiento',
+        'tipo-reparacion',
+        'tipo-instalacion',
+        'tipo-revision',
+        'tipo-limpieza',
+        'tipo-otras',
+        'tipo-1',
+        'tipo-2',
+        'tipo-3',
+        'tipo-4',
+        'tipo-5',
+        'tipo-6',
+        'tipo-7',
+        'tipo-8',
+        'tipo-9',
+        'tipo-10'
+    ];
+    
+    // Generar un hash simple pero efectivo del tipo
+    let hash = 0;
+    for (let i = 0; i < tipo.length; i++) {
+        const char = tipo.charCodeAt(i);
+        hash = ((hash << 5) - hash) + char;
+        hash = hash & hash; // Convertir a entero de 32 bits
+    }
+    
+    // Usar el hash para seleccionar un color de la lista
+    // Esto asegura que el mismo tipo siempre obtenga el mismo color
+    const indice = Math.abs(hash) % clasesDisponibles.length;
+    return clasesDisponibles[indice];
 }
 
 // Crear elemento de incidencia
@@ -730,9 +1064,8 @@ function crearElementoIncidencia(incidencia, usuarioId, fecha) {
         tooltipId = `tooltip-calendario-${incidencia.no.replace(/[^a-zA-Z0-9]/g, '-')}`;
         div.dataset.tooltipId = tooltipId;
         
-        // Vista simple: hora arriba con línea roja, luego incidencia en cuadro gris
+        // Vista simple: solo incidencia en cuadro gris (la hora está en la etiqueta de la celda)
         div.innerHTML = `
-            ${horaHTML ? `<div class="incidencia-hora-container">${horaHTML}<div class="incidencia-hora-linea"></div></div>` : ''}
             <div class="incidencia-simple-box">
                 <div class="incidencia-simple-header">
                     <span class="incidencia-simple-no">${incidencia.no}</span>
@@ -930,6 +1263,54 @@ async function moverIncidencia(noIncidencia, usuarioOrigen, fechaOrigen, usuario
     }
 }
 
+// Mover incidencia con hora específica
+async function moverIncidenciaConHora(noIncidencia, usuarioOrigen, fechaOrigen, usuarioDestino, fechaDestino, nuevaFechaHora) {
+    // Mostrar overlay de carga
+    mostrarOverlayCarga();
+    actualizarMensajeOverlay('Moviendo incidencia...');
+    
+    try {
+        const response = await fetch('/api/mover-incidencia', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                no: noIncidencia,
+                nueva_fecha: fechaDestino,
+                nuevo_usuario_id: usuarioDestino,
+                nueva_fecha_hora: nuevaFechaHora
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            // Actualizar mensaje del overlay
+            actualizarMensajeOverlay('Refrescando incidencias...');
+            
+            // Refrescar incidencias explícitamente
+            await cargarIncidencias();
+            
+            // Actualizar mensaje del overlay
+            actualizarMensajeOverlay('Actualizando calendario...');
+            
+            // Regenerar calendario para mostrar los cambios
+            generarCalendario();
+            
+            console.log(`✅ Incidencia ${noIncidencia} movida correctamente con hora ${nuevaFechaHora}. Datos refrescados.`);
+        } else {
+            alert('Error al mover incidencia: ' + data.error);
+        }
+    } catch (error) {
+        console.error('Error al mover incidencia:', error);
+        alert('Error al mover la incidencia');
+    } finally {
+        // Ocultar overlay de carga
+        ocultarOverlayCarga();
+    }
+}
+
 // Crear elemento de incidencia simplificado (sin foto, solo número, recurso y descripción)
 function crearElementoIncidenciaSimplificado(incidencia) {
     const div = document.createElement('div');
@@ -1075,8 +1456,14 @@ function mostrarIncidenciasLibres() {
     
     // Filtrar incidencias:
     // 1. Sin usuario asignado
-    // 2. O asignadas a usuarios que no están en el filtro
+    // 2. Sin id_gtask (aunque tengan usuario)
+    // 3. O asignadas a usuarios que no están en el filtro
     const incidenciasLibres = estado.incidencias.filter(inc => {
+        // Si no tiene id_gtask, tratarla como no asignada
+        if (!inc.id_gtask || inc.id_gtask === null || inc.id_gtask === undefined || String(inc.id_gtask).trim() === '') {
+            return true;
+        }
+        
         const usuario = inc.usuario;
         
         // Si no tiene usuario, está libre
