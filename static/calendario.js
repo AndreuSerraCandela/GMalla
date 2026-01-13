@@ -1548,7 +1548,7 @@ function mostrarIncidenciasLibres() {
                 icon.textContent = '▶';
                 headerDiv.classList.remove('expandido');
             } else {
-                incidenciasDiv.style.display = 'flex';
+                incidenciasDiv.style.display = 'grid'; // Usar 'grid' en lugar de 'flex' para mantener el layout
                 icon.textContent = '▼';
                 headerDiv.classList.add('expandido');
             }

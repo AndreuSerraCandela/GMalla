@@ -1531,7 +1531,7 @@ body {
 
 .grupo-tipo-incidencias {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    grid-template-columns: repeat(10, 1fr);
     gap: 6px;
     padding: 8px;
     background: #fafafa;
@@ -1539,9 +1539,34 @@ body {
     overflow: visible;
 }
 
-@media (min-width: 1200px) {
+/* Asegurar que las fichas tengan un ancho máximo para que quepan 10 por fila */
+.grupo-tipo-incidencias .incidencia-libre-item {
+    min-width: 0; /* Permitir que se reduzcan si es necesario */
+    max-width: 100%;
+}
+
+/* En pantallas más pequeñas, reducir el número de columnas */
+@media (max-width: 1600px) {
     .grupo-tipo-incidencias {
-        grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+        grid-template-columns: repeat(8, 1fr);
+    }
+}
+
+@media (max-width: 1200px) {
+    .grupo-tipo-incidencias {
+        grid-template-columns: repeat(6, 1fr);
+    }
+}
+
+@media (max-width: 900px) {
+    .grupo-tipo-incidencias {
+        grid-template-columns: repeat(4, 1fr);
+    }
+}
+
+@media (max-width: 600px) {
+    .grupo-tipo-incidencias {
+        grid-template-columns: repeat(2, 1fr);
     }
 }
 
