@@ -142,12 +142,16 @@ def obtener_incidencias():
         filtros = {}
         
         # Filtros opcionales desde query parameters
-        if request.args.get('estado'):
-            filtros['estado'] = request.args.get('estado')
+        estados = request.args.getlist('estado')
+        if estados:
+            filtros['estado'] = estados
+        else:
+            # Por defecto: Abierta y En Progreso (no Cerrada)
+            filtros['estado'] = ['Abierta', 'EnProgreso']
         if request.args.get('recurso'):
             filtros['recurso'] = request.args.get('recurso')
         
-        incidencias = bc_client.obtener_incidencias(filtros=filtros if filtros else None)
+        incidencias = bc_client.obtener_incidencias(filtros=filtros)
         
         # Convertir incidencias a formato JSON
         incidencias_json = []
@@ -441,6 +445,7 @@ def actualizar_incidencia():
         nueva_descripcion = data.get('descripcion')
         nueva_fecha_hora = data.get('fecha_hora')
         nuevo_recurso = data.get('recurso')
+        nuevo_estado = data.get('state') or data.get('estado')
         
         if not id_gtask:
             return jsonify({
@@ -478,6 +483,16 @@ def actualizar_incidencia():
         # Actualizar recurso si se proporciona
         if nuevo_recurso is not None:
             incidencia.recurso = nuevo_recurso
+        
+        # Actualizar estado si se proporciona (ej. "Cerrada" desde "Cerrar incidencia")
+        if nuevo_estado is not None:
+            estado_str = str(nuevo_estado).strip()
+            if estado_str in ('0', '1', '2'):
+                map_num = {'0': EstadoIncidencia.ABIERTA, '1': EstadoIncidencia.EN_PROGRESO, '2': EstadoIncidencia.CERRADA}
+                incidencia.estado = map_num[estado_str]
+            elif estado_str in ('Abierta', 'EnProgreso', 'Cerrada') or estado_str == 'En Progreso':
+                normalizado = 'EnProgreso' if estado_str == 'En Progreso' else estado_str
+                incidencia.estado = EstadoIncidencia(normalizado)
         
         # Actualizar en Business Central
         exito = bc_client.actualizar_incidencia(incidencia)
@@ -593,14 +608,17 @@ def ejecutar_asignacion_automatica():
         fecha_inicio_str = data.get('fecha_inicio')  # Fecha inicio del rango
         fecha_fin_str = data.get('fecha_fin')  # Fecha fin del rango
         
-        # Obtener todas las incidencias
+        # Obtener todas las incidencias (mismo filtro de estado que listado)
         filtros = {}
-        if request.args.get('estado'):
-            filtros['estado'] = request.args.get('estado')
+        estados = request.args.getlist('estado')
+        if estados:
+            filtros['estado'] = estados
+        else:
+            filtros['estado'] = ['Abierta', 'EnProgreso']
         if request.args.get('recurso'):
             filtros['recurso'] = request.args.get('recurso')
         
-        incidencias = bc_client.obtener_incidencias(filtros=filtros if filtros else None)
+        incidencias = bc_client.obtener_incidencias(filtros=filtros)
         
         if not incidencias:
             return jsonify({

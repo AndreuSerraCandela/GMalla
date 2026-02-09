@@ -64,6 +64,13 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
     
+    // Filtro de estado (Abierta, En Progreso, Cerrada): al cambiar, recargar incidencias
+    const filtroEstadoContainer = document.getElementById('filtro-estado-container');
+    if (filtroEstadoContainer) {
+        filtroEstadoContainer.querySelectorAll('input[name="filtro-estado"]').forEach(cb => {
+            cb.addEventListener('change', cargarIncidencias);
+        });
+    }
     // Filtro de usuarios
     document.getElementById('filtro-usuarios-btn').addEventListener('click', toggleFiltroPanel);
     document.getElementById('cerrar-filtro-btn').addEventListener('click', cerrarFiltroPanel);
@@ -311,10 +318,24 @@ async function cargarUsuarios() {
     }
 }
 
-// Cargar incidencias
+// Obtener estados seleccionados en el filtro de estado (sidebar). Por defecto Abierta y En Progreso.
+function obtenerFiltroEstados() {
+    const container = document.getElementById('filtro-estado-container');
+    if (!container) return ['Abierta', 'EnProgreso'];
+    const checked = container.querySelectorAll('input[name="filtro-estado"]:checked');
+    const valores = Array.from(checked).map(c => c.value);
+    return valores.length ? valores : ['Abierta', 'EnProgreso'];
+}
+
+// Cargar incidencias (respeta filtro de estado del sidebar)
 async function cargarIncidencias() {
     try {
-        const response = await fetch('/api/incidencias');
+        const estadosSeleccionados = obtenerFiltroEstados();
+        const params = new URLSearchParams();
+        estadosSeleccionados.forEach(e => params.append('estado', e));
+        const query = params.toString();
+        const url = query ? `/api/incidencias?${query}` : '/api/incidencias';
+        const response = await fetch(url);
         const data = await response.json();
         
         if (data.success) {
@@ -1563,6 +1584,8 @@ function mostrarIncidenciasLibres() {
 // Variable global para almacenar el detalle actual y el id_gtask
 let detalleActual = null;
 let idGtaskActual = null;
+/** Estado pendiente de guardar (ej. 'Cerrada') cuando el usuario pulsa "Cerrar incidencia" */
+let estadoPendienteGuardar = null;
 
 // Objeto para almacenar las rotaciones de las imágenes (URL -> grados: 0, 90, 180, 270)
 let rotacionesImagenes = {};
@@ -1585,6 +1608,7 @@ async function abrirDetalleIncidencia(idGtask) {
         
         if (data.success && data.detalle) {
             detalleActual = data.detalle;
+            estadoPendienteGuardar = null;
             mostrarDetalleIncidencia(data.detalle);
         } else {
             contenido.innerHTML = `
@@ -1724,7 +1748,10 @@ function mostrarDetalleIncidencia(detalle) {
             <div style="display: flex; gap: 20px; align-items: flex-start;">
                 <div class="detalle-campo" style="flex: 1;">
                     <label>Estado:</label>
-                    <p><span class="estado-badge estado-${(detalle.state || '').toLowerCase()}">${formatearEstado(detalle.state) || 'N/A'}</span></p>
+                    <p>
+                        <span id="detalle-estado-badge" class="estado-badge estado-${estadoClaseBadge(detalle.state)}">${formatearEstado(detalle.state) || 'N/A'}</span>
+                        ${esEstadoCerrada(detalle.state) ? '' : '<button type="button" id="cerrar-incidencia-btn" class="btn-cerrar-incidencia" title="Marcar como cerrada y guardar con Guardar Cambios">✓ Cerrar incidencia</button>'}
+                    </p>
                 </div>
                 <div class="detalle-campo" style="flex: 1;">
                     <label>Fecha/Hora:</label>
@@ -1765,6 +1792,22 @@ function mostrarDetalleIncidencia(detalle) {
     if (guardarBtn) {
         guardarBtn.addEventListener('click', () => {
             guardarCambiosIncidencia();
+        });
+    }
+    // Botón Cerrar incidencia: marca estado como Cerrada (se envía al pulsar Guardar Cambios)
+    const cerrarBtn = document.getElementById('cerrar-incidencia-btn');
+    const estadoBadge = document.getElementById('detalle-estado-badge');
+    if (cerrarBtn && estadoBadge) {
+        cerrarBtn.addEventListener('click', () => {
+            estadoPendienteGuardar = 'Cerrada';
+            estadoBadge.textContent = 'Cerrada';
+            estadoBadge.className = 'estado-badge estado-cerrada';
+            cerrarBtn.remove();
+            const mensajeSpan = document.getElementById('guardar-mensaje');
+            if (mensajeSpan) {
+                mensajeSpan.textContent = 'Estado marcado como Cerrada. Pulsa "Guardar Cambios" para enviar.';
+                mensajeSpan.className = 'guardar-mensaje guardar-mensaje-info';
+            }
         });
     }
     
@@ -1924,10 +1967,11 @@ async function guardarCambiosIncidencia() {
     }
     
     const recursoOriginal = detalleActual.resource || '';
+    const hayCambioEstado = estadoPendienteGuardar !== null;
     
     if (nuevaDescripcion === descripcionOriginalTexto && 
         nuevaFechaHora === fechaOriginalInput && 
-        nuevoRecurso === recursoOriginal) {
+        nuevoRecurso === recursoOriginal && !hayCambioEstado) {
         if (mensajeSpan) {
             mensajeSpan.textContent = 'No hay cambios para guardar';
             mensajeSpan.className = 'guardar-mensaje guardar-mensaje-info';
@@ -1954,13 +1998,16 @@ async function guardarCambiosIncidencia() {
     mostrarOverlayCarga();
     
     try {
-        // Preparar datos para enviar
+        // Preparar datos para enviar (incluir estado si se pulsó "Cerrar incidencia")
         const datosActualizacion = {
             id_gtask: idGtaskActual,
             descripcion: nuevaDescripcion,
             fecha_hora: nuevaFechaHora,
             recurso: nuevoRecurso
         };
+        if (estadoPendienteGuardar) {
+            datosActualizacion.state = estadoPendienteGuardar;
+        }
         
         const response = await fetch('/api/actualizar-incidencia', {
             method: 'POST',
@@ -1980,6 +2027,10 @@ async function guardarCambiosIncidencia() {
             }
             if (nuevoRecurso) {
                 detalleActual.resource = nuevoRecurso;
+            }
+            if (estadoPendienteGuardar) {
+                detalleActual.state = estadoPendienteGuardar;
+                estadoPendienteGuardar = null;
             }
             
             if (mensajeSpan) {
@@ -2017,6 +2068,18 @@ async function guardarCambiosIncidencia() {
             guardarBtn.textContent = '💾 Guardar Cambios';
         }
     }
+}
+
+// Clase CSS del badge de estado (abierta, enprogreso, cerrada)
+function estadoClaseBadge(state) {
+    const m = { '0': 'abierta', '1': 'enprogreso', '2': 'cerrada', 'Abierta': 'abierta', 'EnProgreso': 'enprogreso', 'En Progreso': 'enprogreso', 'Cerrada': 'cerrada', 'PENDING': 'abierta', 'IN_PROGRESS': 'enprogreso', 'CLOSED': 'cerrada' };
+    return m[String(state)] || 'abierta';
+}
+
+// Indica si el estado actual es Cerrada
+function esEstadoCerrada(state) {
+    const s = String(state);
+    return s === '2' || s === 'Cerrada' || s === 'CLOSED';
 }
 
 // Formatear estado (convertir código numérico a texto)

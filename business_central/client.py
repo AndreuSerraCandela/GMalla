@@ -61,10 +61,14 @@ class BusinessCentralClient:
             if filtros:
                 filter_parts = []
                 
-                # Filtro por estado
+                # Filtro por estado (varios valores: Abierta, EnProgreso, Cerrada)
                 if 'estado' in filtros:
-                    estado = filtros['estado']
-                    filter_parts.append(f"Estado eq '{estado}'")
+                    est = filtros['estado']
+                    if isinstance(est, (list, tuple)):
+                        if est:
+                            filter_parts.append("(" + " or ".join(f"Estado eq '{e}'" for e in est) + ")")
+                    else:
+                        filter_parts.append(f"Estado eq '{est}'")
                 
                 # Filtro por recurso
                 if 'recurso' in filtros:

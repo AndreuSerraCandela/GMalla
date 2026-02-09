@@ -239,6 +239,24 @@ body {
 
 
 /* Filtros de tipos */
+.filtro-estado {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.filtro-estado-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.9rem;
+    cursor: pointer;
+}
+
+.filtro-estado-item input {
+    cursor: pointer;
+}
+
 .tipos-filtro,
 .eventos-filtro {
     display: flex;
@@ -1302,6 +1320,24 @@ body {
     background: #6c757d;
     cursor: not-allowed;
     opacity: 0.6;
+}
+
+.btn-cerrar-incidencia {
+    margin-left: 10px;
+    background: #2d5016;
+    color: white;
+    border: none;
+    padding: 6px 14px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.85em;
+    font-weight: 500;
+    font-family: 'Montserrat', sans-serif;
+    transition: background 0.3s;
+}
+
+.btn-cerrar-incidencia:hover {
+    background: #234012;
 }
 
 .guardar-mensaje {
