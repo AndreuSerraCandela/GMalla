@@ -213,6 +213,16 @@ def obtener_usuarios():
         }), 500
 
 
+@app.route('/api/usuarios/limpiar-cache', methods=['POST'])
+def limpiar_cache_usuarios():
+    """Limpia el caché de usuarios de GTask para forzar una nueva carga con nombres actualizados"""
+    try:
+        gtask_client.limpiar_cache()
+        return jsonify({'success': True, 'message': 'Caché de usuarios limpiado'})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @app.route('/api/calendario', methods=['GET'])
 def obtener_calendario():
     """API para obtener el calendario de un usuario en un rango de fechas"""
@@ -453,9 +463,11 @@ def actualizar_incidencia():
                 'error': 'Falta el ID de la incidencia (id_gtask)'
             }), 400
         
-        # Buscar la incidencia
+        # Buscar la incidencia (primero por id_gtask, si no por No)
         incidencias = bc_client.obtener_incidencias()
         incidencia = next((inc for inc in incidencias if inc.id_gtask == id_gtask), None)
+        if not incidencia:
+            incidencia = next((inc for inc in incidencias if str(inc.no) == str(id_gtask)), None)
         
         if not incidencia:
             return jsonify({

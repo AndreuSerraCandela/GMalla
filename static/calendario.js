@@ -76,6 +76,7 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('cerrar-filtro-btn').addEventListener('click', cerrarFiltroPanel);
     document.getElementById('seleccionar-todos-btn').addEventListener('click', seleccionarTodosUsuarios);
     document.getElementById('deseleccionar-todos-btn').addEventListener('click', deseleccionarTodosUsuarios);
+    document.getElementById('actualizar-nombres-btn').addEventListener('click', actualizarNombresUsuarios);
     
     // Asignación automática
     document.getElementById('asignar-automatico-btn').addEventListener('click', ejecutarAsignacionAutomatica);
@@ -818,11 +819,14 @@ function generarCalendario() {
                 
                 td.appendChild(horasContainer);
             } else {
-                // Vista normal: agregar incidencias directamente
+                // Vista normal: contenedor con grid 2 columnas y agregar incidencias
+                const contenidoDiv = document.createElement('div');
+                contenidoDiv.className = 'celda-dia-contenido';
                 incidenciasParaAgregar.forEach(incidencia => {
                     const incDiv = crearElementoIncidencia(incidencia, usuarioIdNormalizado, fechaStr);
-                    td.appendChild(incDiv);
+                    contenidoDiv.appendChild(incDiv);
                 });
+                td.appendChild(contenidoDiv);
                 
                 // Hacer la celda droppable
                 td.addEventListener('dragover', (e) => {
@@ -1060,7 +1064,7 @@ function crearElementoIncidencia(incidencia, usuarioId, fecha) {
     
     // Mostrar descripción como elemento principal (más importante)
     const descripcion = incidencia.descripcion || 'Sin descripción';
-    const descripcionCorta = descripcion.length > 40 ? descripcion.substring(0, 40) + '...' : descripcion;
+    const descripcionCorta = descripcion.length > 80 ? descripcion.substring(0, 80) + '...' : descripcion;
     const recurso = incidencia.recurso || 'N/A';
     
     // Formatear hora si existe fecha_hora
@@ -1117,13 +1121,14 @@ function crearElementoIncidencia(incidencia, usuarioId, fecha) {
         
         div.innerHTML = `
             <div class="incidencia-header">
+                <span class="incidencia-no-header">${incidencia.no}</span>
                 <span class="incidencia-editar" data-id-gtask="${incidencia.id_gtask || incidencia.no}" title="Ver detalle">
                     ✏️
                 </span>
             </div>
             ${imagenHTML}
             <div class="incidencia-descripcion">${descripcionCorta}</div>
-            <div class="incidencia-no">${incidencia.no}</div>
+            
         `;
     }
     
@@ -2753,6 +2758,35 @@ function cargarFiltroUsuarios() {
     } catch (error) {
         console.error('Error al cargar filtro de usuarios:', error);
         estado.usuariosFiltrados = null;
+    }
+}
+
+// Borrar caché de usuarios y volver a cargar nombres desde GTask
+async function actualizarNombresUsuarios() {
+    const btn = document.getElementById('actualizar-nombres-btn');
+    if (!btn) return;
+    const textoOriginal = btn.textContent;
+    try {
+        btn.disabled = true;
+        btn.textContent = 'Actualizando…';
+        const res = await fetch('/api/usuarios/limpiar-cache', { method: 'POST' });
+        const data = await res.json();
+        if (!data.success) {
+            console.error('Error al limpiar caché:', data.error);
+            btn.textContent = 'Error';
+            setTimeout(() => { btn.textContent = textoOriginal; btn.disabled = false; }, 2000);
+            return;
+        }
+        await cargarUsuarios();
+        actualizarListaFiltroUsuarios();
+        generarCalendario();
+        mostrarIncidenciasLibres();
+        btn.textContent = '✓ Listo';
+        setTimeout(() => { btn.textContent = textoOriginal; btn.disabled = false; }, 1500);
+    } catch (err) {
+        console.error('Error al actualizar nombres:', err);
+        btn.textContent = 'Error';
+        setTimeout(() => { btn.textContent = textoOriginal; btn.disabled = false; }, 2000);
     }
 }
 

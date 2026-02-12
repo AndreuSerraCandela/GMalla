@@ -682,6 +682,16 @@ body {
     position: relative;
 }
 
+/* Contenedor con grid 2 columnas (no el td, para no romper la tabla) */
+.celda-dia-contenido {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1px 3px; /* menos separación vertical, algo de separación horizontal */
+    align-content: start;
+    width: 100%;
+    min-height: 100%;
+}
+
 /* Estructura de horas en vista simple */
 .celda-dia-horas {
     display: flex;
@@ -768,20 +778,19 @@ body {
     position: relative;
     min-height: auto;
     padding: 0;
-    display: flex;
-    flex-direction: column;
-    flex-wrap: nowrap;
-    gap: 2px;
-    align-items: stretch;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1px 2px; /* menos separación vertical */
+    align-content: start;
     overflow-x: visible;
 }
 
-/* Ajustes para incidencias en vista simple con horas */
+/* Ajustes para incidencias en vista simple con horas (cada una en su celda del grid) */
 .celda-hora .incidencia-simple {
     margin: 0;
     width: 100%;
+    min-width: 0;
     max-width: 100%;
-    flex-shrink: 0;
 }
 
 .celda-hora .incidencia-simple-box {
@@ -1028,7 +1037,8 @@ body {
 
 .incidencia-header {
     display: flex;
-    justify-content: flex-end;
+    justify-content: space-between;
+    align-items: center;
     margin-bottom: 4px;
 }
 
@@ -1156,7 +1166,7 @@ body {
     max-height: 60px;
     object-fit: cover;
     border-radius: 4px;
-    margin-bottom: 6px;
+    margin-bottom: 4px;
     cursor: pointer;
     transition: transform 0.2s;
 }
@@ -1168,8 +1178,8 @@ body {
 .incidencia-descripcion {
     font-size: 0.95em;
     font-weight: 600;
-    margin-bottom: 4px;
-    line-height: 1.3;
+    margin-bottom: 2px;
+    line-height: 1.1;
     word-wrap: break-word;
 }
 
@@ -1178,6 +1188,105 @@ body {
     opacity: 0.85;
     font-weight: normal;
     margin-top: 2px;
+}
+
+/* Ficha de incidencia en calendario: más baja y compacta por defecto, crece al pasar el ratón */
+.calendario-tabla .celda-dia .incidencia:not(.incidencia-simple),
+.calendario-tabla .celda-hora .incidencia:not(.incidencia-simple) {
+    padding: 1px 3px;
+    margin: 0;
+    font-size: 0.5em;
+    line-height: 1.15;
+    transition: transform 0.2s ease, padding 0.2s ease, box-shadow 0.2s ease;
+    min-height: auto;
+    min-width: 0;
+    transform: scale(0.95);
+    transform-origin: center center;
+}
+.calendario-tabla .celda-dia .incidencia:not(.incidencia-simple) .incidencia-miniatura,
+.calendario-tabla .celda-hora .incidencia:not(.incidencia-simple) .incidencia-miniatura {
+    max-height: 0;
+    margin: 0;
+    opacity: 0;
+    overflow: hidden;
+    transition: all 0.2s ease;
+}
+.calendario-tabla .celda-dia .incidencia:not(.incidencia-simple) .incidencia-descripcion,
+.calendario-tabla .celda-hora .incidencia:not(.incidencia-simple) .incidencia-descripcion {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 110px; /* más texto visible en miniatura */
+    font-size: 1em;
+    line-height: inherit;
+}
+.calendario-tabla .celda-dia .incidencia:not(.incidencia-simple) .incidencia-no,
+.calendario-tabla .celda-hora .incidencia:not(.incidencia-simple) .incidencia-no {
+    display: none;
+}
+.calendario-tabla .celda-dia .incidencia:not(.incidencia-simple):hover,
+.calendario-tabla .celda-hora .incidencia:not(.incidencia-simple):hover {
+    padding: 10px 12px;
+    font-size: 0.29em;
+    line-height: 1.3;
+    z-index: 100;
+    position: relative;
+    overflow: visible;
+    box-shadow: 0 6px 16px rgba(0,0,0,0.25);
+    transform: scale(3, 3);
+    min-width: 220px; /* al expandirse cabe más texto */
+}
+.calendario-tabla .celda-dia .incidencia:not(.incidencia-simple):hover .incidencia-miniatura,
+.calendario-tabla .celda-hora .incidencia:not(.incidencia-simple):hover .incidencia-miniatura {
+    max-height: 60px;
+    margin-bottom: 6px;
+    opacity: 1;
+}
+.calendario-tabla .celda-dia .incidencia:not(.incidencia-simple):hover .incidencia-descripcion,
+.calendario-tabla .celda-hora .incidencia:not(.incidencia-simple):hover .incidencia-descripcion {
+    white-space: normal;
+    max-width: none;
+    min-width: 280px; /* más espacio para la descripción expandida */
+}
+.calendario-tabla .celda-dia .incidencia:not(.incidencia-simple):hover .incidencia-no,
+.calendario-tabla .celda-hora .incidencia:not(.incidencia-simple):hover .incidencia-no {
+    display: block;
+}
+
+/* Vista simple: caja más baja y compacta, crece vertical y horizontal al hover */
+.calendario-tabla .celda-dia .incidencia-simple .incidencia-simple-box,
+.calendario-tabla .celda-hora .incidencia-simple .incidencia-simple-box {
+    padding: 0 2px;
+    font-size: 0.5em;
+    line-height: 1.2;
+    transform: scale(0.5);
+    transform-origin: left center;
+    transition: transform 0.2s ease, padding 0.2s ease, box-shadow 0.2s ease;
+    max-width: 95%;
+}
+.calendario-tabla .celda-dia .incidencia-simple .incidencia-simple-descripcion,
+.calendario-tabla .celda-hora .incidencia-simple .incidencia-simple-descripcion {
+    max-width: 72px; /* más texto visible en miniatura */
+}
+.calendario-tabla .celda-dia .incidencia-simple:hover,
+.calendario-tabla .celda-hora .incidencia-simple:hover {
+    position: relative;
+    z-index: 100;
+}
+.calendario-tabla .celda-dia .incidencia-simple:hover .incidencia-simple-box,
+.calendario-tabla .celda-hora .incidencia-simple:hover .incidencia-simple-box {
+    padding: 4px 6px;
+    font-size: 0.8em;
+    line-height: 1.35;
+    transform: scale(1.25, 1.08);
+    position: relative;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+    max-width: none;
+    min-width: 200px; /* al expandirse cabe más texto */
+}
+.calendario-tabla .celda-dia .incidencia-simple:hover .incidencia-simple-descripcion,
+.calendario-tabla .celda-hora .incidencia-simple:hover .incidencia-simple-descripcion {
+    max-width: 620px; /* más texto visible al expandir */
 }
 
 .detalle-incidencia {
