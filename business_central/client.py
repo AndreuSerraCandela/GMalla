@@ -3,9 +3,12 @@ Cliente para interactuar con Business Central
 Los métodos específicos para recuperar y guardar incidencias se implementarán aquí
 """
 import json
+import logging
 import requests
 from datetime import datetime
 from typing import List, Optional, Dict, Any
+
+_bc_log = logging.getLogger(__name__)
 
 # Importar modelo de incidencia con fallback
 try:
@@ -18,13 +21,29 @@ except ImportError:
 
 # Importar config desde la raíz del proyecto (usando importación relativa)
 try:
-    from ...config import get_bc_incidences_url, get_bc_lista_incidencias_url, get_bc_auth_header, get_bc_auth_credentials, BC_CONFIG
+    from ...config import (
+        get_bc_incidences_url,
+        get_bc_detalle_incidences_url,
+        get_bc_lista_incidencias_url,
+        get_bc_post_respuesta_whatsapp_url,
+        get_bc_auth_header,
+        get_bc_auth_credentials,
+        BC_CONFIG,
+    )
 except ImportError:
     # Fallback: importación absoluta si la relativa falla
     import sys
     from pathlib import Path
     sys.path.insert(0, str(Path(__file__).parent.parent.parent))
-    from config import get_bc_incidences_url, get_bc_detalle_incidences_url, get_bc_lista_incidencias_url, get_bc_auth_header, get_bc_auth_credentials, BC_CONFIG
+    from config import (
+        get_bc_incidences_url,
+        get_bc_detalle_incidences_url,
+        get_bc_lista_incidencias_url,
+        get_bc_post_respuesta_whatsapp_url,
+        get_bc_auth_header,
+        get_bc_auth_credentials,
+        BC_CONFIG,
+    )
 
 
 class BusinessCentralClient:
@@ -86,6 +105,12 @@ class BusinessCentralClient:
                     if isinstance(fecha, str):
                         filter_parts.append(f"Fecha_Hora ge {fecha}")
                     # Puedes agregar más lógica de filtrado por fecha si es necesario
+
+                # Una fila concreta por id GTask (evita depender solo de la 1.ª página OData)
+                if filtros.get('id_gtask'):
+                    gid = str(filtros['id_gtask']).strip().replace("'", "''")
+                    if gid:
+                        filter_parts.append(f"Id_Gtask eq '{gid}'")
                 
                 if filter_parts:
                     params['$filter'] = ' and '.join(filter_parts)
@@ -153,17 +178,17 @@ class BusinessCentralClient:
                                 pass
                         
                         # Mapear campos de OData al modelo
-                        # Priorizar Id_Uduario_Gtask (ID de GTask) sobre Usuario (email)
-                        # Solo usar Id_Uduario_Gtask si tiene un valor válido (no vacío)
-                        id_gtask_usuario = inc_data.get("Id_Uduario_Gtask") or inc_data.get("Id_Usuario_Gtask")
-                        # Si Id_Uduario_Gtask está vacío o es None, tratar como sin usuario
-                        if id_gtask_usuario and str(id_gtask_usuario).strip():
-                            usuario_id = id_gtask_usuario
-                        else:
-                            usuario_id = None  # Sin usuario asignado
+                        # Usuario creador: Id_Uduario_Gtask (nombre en BC: Usuario)
+                        # Usuario asignado: Id_Uduario_Gtask_Asignado (nombre en BC: Usuario Asignado)
+                        id_creador = inc_data.get("Id_Uduario_Gtask") or inc_data.get("Id_Usuario_Gtask")
+                        if id_creador and not str(id_creador).strip():
+                            id_creador = None
+                        id_asignado = inc_data.get("Id_Uduario_Gtask_Asignado") or inc_data.get("Id_Usuario_Gtask_Asignado")
+                        if id_asignado and not str(id_asignado).strip():
+                            id_asignado = None
                         id_tarea_gtask = inc_data.get("ID_Tarea_Gtask", "")
-                        if id_tarea_gtask=="":
-                            usuario_id = None # Sin usuario asignado
+                        if id_tarea_gtask == "":
+                            id_asignado = None  # Sin usuario asignado si no hay tarea GTask
                         incidencia_dict = {
                             "No.": inc_data.get("No", ""),
                             "Descripción": inc_data.get("Descripción", ""),
@@ -172,10 +197,12 @@ class BusinessCentralClient:
                             "Estado": inc_data.get("Estado", "Abierta"),
                             "FechaHora": fecha_hora_str,
                             "Fecha": fecha.isoformat() if fecha else None,
-                            "Usuario": usuario_id,  # Usar Id_Uduario_Gtask si está disponible
-                            "Id_Gtask": inc_data.get("Id_Gtask", ""),  # Id_Gtask desde OData
+                            "Usuario": id_asignado,  # Id_Uduario_Gtask_Asignado - usuario asignado
+                            "UsuarioCreador": id_creador,  # Id_Uduario_Gtask - usuario creador
+                            "Id_Gtask": inc_data.get("Id_Gtask", ""),
                             "ID_Tarea_Gtask": inc_data.get("ID_Tarea_Gtask", ""),
-                            "URL_Primera_Imagen": inc_data.get("URL_Primera_Imagen", "")  # URL de la primera imagen
+                            "URL_Primera_Imagen": inc_data.get("URL_Primera_Imagen", ""),
+                            "Comunicado_por_EMT": inc_data.get("Comunicado_por_EMT")
                         }
                         
                         # Crear objeto Incidencia desde el diccionario
@@ -222,30 +249,20 @@ class BusinessCentralClient:
             print("=" * 50)
             return []
     
-    def guardar_incidencia(self, incidencia: Incidencia) -> bool:
-        """
-        Guarda una incidencia en Business Central
-        
-        Args:
-            incidencia: Objeto Incidencia a guardar
-        
-        Returns:
-            True si se guardó correctamente, False en caso contrario
-        """
-        # TODO: Implementar método para guardar incidencias
-        # Este método se implementará cuando se proporcionen los detalles de la API
-        raise NotImplementedError("Este método se implementará con los detalles de la API de Business Central")
-    
-    def actualizar_incidencia(self, incidencia: Incidencia) -> bool:
+    def actualizar_incidencia(self, incidencia: Incidencia) -> tuple:
         """
         Actualiza una incidencia existente en Business Central.
-        En este caso, solo se envían fecha y usuario (sin documentos).
+        Se envían fecha, estado, recurso, descripción, user (creador, no se cambia) y user_assigned (usuario asignado).
+        
+        Si el API devuelve HTTP 200 pero el JSON contiene la clave "error",
+        se considera fallo y no se guardan los cambios.
         
         Args:
-            incidencia: Objeto Incidencia con los datos actualizados
+            incidencia: Objeto Incidencia con los datos actualizados (usuario_creador = Id_Uduario_Gtask, usuario = Id_Uduario_Gtask_Asignado)
         
         Returns:
-            True si se actualizó correctamente, False en caso contrario
+            (True, None) si se actualizó correctamente,
+            (False, mensaje_error) en caso contrario (mensaje del API si viene en el JSON)
         """
         try:
             # Validar campos mínimos requeridos
@@ -253,7 +270,7 @@ class BusinessCentralClient:
             id_gtask = incidencia.id_gtask or incidencia.no
             if not id_gtask:
                 print("❌ Error: La incidencia debe tener un Id_Gtask o No")
-                return False
+                return (False, "La incidencia debe tener un Id_Gtask o No")
             
             # URL del endpoint de incidencias en Business Central
             url = get_bc_incidences_url()
@@ -310,17 +327,20 @@ class BusinessCentralClient:
             # Si no hay Id_Gtask, usar No como fallback
             id_gtask = incidencia.id_gtask or incidencia.no
             
+            # user = usuario creador (Id_Uduario_Gtask), no se cambia al actualizar
+            # user_assigned = usuario asignado (Id_Uduario_Gtask_Asignado), es el que se asigna al guardar
             bc_incidence_data = {
-                "_id": id_gtask,  # Usar Id_Gtask en lugar de No
+                "_id": id_gtask,
                 "state": estado_bc,
                 "incidenceType": incidencia.tipo_incidencia or "",
                 "observation": descripcion_limpia,
                 "description": descripcion_limpia,
                 "resource": incidencia.recurso or "",
-                "user": incidencia.usuario or "",  # ID del usuario (Id_Uduario_Gtask)
+                "user": incidencia.usuario_creador or "",  # Creador (Id_Uduario_Gtask), no se modifica
+                "user_assigned": incidencia.usuario or "",  # Usuario asignado (Id_Uduario_Gtask_Asignado)
                 "fechahora": fecha_hora_str,
-                "image": [],  # Sin imágenes
-                "audio": []   # Sin audios
+                "image": [],
+                "audio": []
             }
             
             # Envolver en el formato que espera BC
@@ -370,15 +390,32 @@ class BusinessCentralClient:
                 timeout=timeout
             )
             
-            # Verificar si la petición fue exitosa
+            # Verificar si la petición fue exitosa (código 2xx)
             if response.status_code in (200, 201, 204):
+                # Si el API devuelve 200 pero el JSON contiene "error", no considerar éxito
+                try:
+                    data = response.json()
+                    if isinstance(data, dict) and data.get("error"):
+                        error_msg = data.get("error", "Error desconocido")
+                        print(f"❌ API devolvió 200 pero con error en el cuerpo: {error_msg}")
+                        print(f"❌ Respuesta: {response.text}")
+                        return (False, str(error_msg))
+                except (ValueError, TypeError):
+                    pass  # No es JSON o no tiene la estructura esperada
                 print(f"✅ Incidencia actualizada correctamente en BC: {response.text}")
-                return True
+                return (True, None)
             else:
-                print(f"❌ zar incidencia en BC. Código: {response.status_code}")
+                error_msg = None
+                try:
+                    data = response.json()
+                    if isinstance(data, dict) and data.get("error"):
+                        error_msg = data.get("error")
+                except (ValueError, TypeError):
+                    pass
+                print(f"❌ Error al actualizar incidencia en BC. Código: {response.status_code}")
                 print(f"❌ Respuesta completa: {response.text}")
                 print(f"❌ URL que falló: {url}")
-                return False
+                return (False, error_msg or f"Error del servidor: {response.status_code}")
                 
         except requests.exceptions.RequestException as e:
             error_msg = f'Error de conexión con Business Central: {str(e)}'
@@ -386,7 +423,7 @@ class BusinessCentralClient:
             print("❌❌❌ ERROR DE CONEXIÓN CON BC ❌❌❌")
             print(f"❌ Error: {error_msg}")
             print("=" * 50)
-            return False
+            return (False, error_msg)
             
         except Exception as e:
             import traceback
@@ -397,7 +434,7 @@ class BusinessCentralClient:
             print(f"❌ Error: {error_msg}")
             print(f"📋 Traceback completo:\n{error_trace}")
             print("=" * 50)
-            return False
+            return (False, error_msg)
     
     def obtener_detalle_incidencia(self, id_gtask: str) -> Optional[Dict[str, Any]]:
         """
@@ -465,10 +502,15 @@ class BusinessCentralClient:
             # Verificar si la petición fue exitosa
             if response.status_code in (200, 201):
                 try:
+                    respuesta = response.json()
+                    # Si el JSON contiene "error", no considerar éxito
+                    if isinstance(respuesta, dict) and respuesta.get("error"):
+                        error_msg = respuesta.get("error", "Error desconocido")
+                        print(f"❌ API devolvió 200 pero con error en el cuerpo: {error_msg}")
+                        return None
+
                     # El procedimiento devuelve un objeto OData con @odata.context y value
                     # donde value es una cadena JSON que contiene el detalle real
-                    respuesta = response.json()
-                    
                     # Extraer el campo 'value' que contiene el JSON como cadena
                     if 'value' in respuesta:
                         # Parsear la cadena JSON dentro de 'value'
@@ -518,4 +560,79 @@ class BusinessCentralClient:
             print(f"❌ Error interno: {error_msg}")
             print(f"📋 Traceback:\n{error_trace}")
             return None
+
+    def notificar_respuesta_whatsapp(self, inner: Dict[str, Any]) -> tuple[bool, Optional[str]]:
+        """
+        POST al servicio OData postRespuestaWhatsApp (jsonText), mismo patrón que Apiwhats → BC.
+        inner suele incluir: id_mensaje, telefono, texto; GMalla añade id_incidencia.
+        """
+        try:
+            if not inner.get("id_mensaje"):
+                return False, "Falta id_mensaje"
+            url = get_bc_post_respuesta_whatsapp_url()
+            _bc_log.info(
+                "postRespuestaWhatsApp POST %s Nº=%s wamid=%s…",
+                url,
+                inner.get("id_incidencia"),
+                str(inner.get("id_mensaje", ""))[:32],
+            )
+            print(
+                f"[BC postRespuestaWhatsApp] POST {url} | Nº incidencia={inner.get('id_incidencia')} | "
+                f"wamid={str(inner.get('id_mensaje', ''))[:40]}…"
+            )
+            json_text = json.dumps(inner, ensure_ascii=False)
+            datos = {"jsonText": json_text}
+            params = {"company": BC_CONFIG["company"]}
+            headers = {
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+            }
+            auth_header = get_bc_auth_header()
+            if auth_header:
+                headers["Authorization"] = auth_header
+                auth_credentials = None
+            else:
+                auth_credentials = get_bc_auth_credentials()
+            timeout = BC_CONFIG.get("timeout", 120)
+            response = requests.post(
+                url,
+                params=params,
+                headers=headers,
+                data=json.dumps(datos),
+                auth=auth_credentials,
+                timeout=timeout,
+            )
+            raw = response.text or ""
+            if response.status_code >= 400:
+                print(
+                    f"❌ BC postRespuestaWhatsApp HTTP {response.status_code}: {raw[:1200]}"
+                )
+                return False, raw[:2000]
+            try:
+                data = response.json()
+                if isinstance(data, dict) and data.get("error"):
+                    err = str(data.get("error"))
+                    print(f"❌ BC postRespuestaWhatsApp error en JSON: {err}")
+                    return False, err
+                if isinstance(data, dict) and data.get("value") is not None:
+                    val = data["value"]
+                    if isinstance(val, str):
+                        inner_resp = json.loads(val.replace("\r\n", " ").strip())
+                        if isinstance(inner_resp, dict) and inner_resp.get("ok") is False:
+                            err = str(inner_resp.get("error") or "error")
+                            print(f"❌ BC postRespuestaWhatsApp: {err}")
+                            return False, err
+            except (json.JSONDecodeError, TypeError, ValueError):
+                pass
+            print(
+                f"✅ BC postRespuestaWhatsApp OK | Nº={inner.get('id_incidencia')} | "
+                f"wamid={inner.get('id_mensaje', '')[:56]}…"
+            )
+            return True, None
+        except requests.exceptions.RequestException as e:
+            print(f"❌ BC postRespuestaWhatsApp red: {e}")
+            return False, str(e)
+        except Exception as e:
+            print(f"❌ BC postRespuestaWhatsApp: {e}")
+            return False, str(e)
 

@@ -92,14 +92,22 @@ class GTaskClient:
                         users = data
                     elif isinstance(data, dict):
                         # Si viene en formato { "users": [...], "count": ... }
-                        users = data.get('users', [])
+                        users = data.get('users') or []
                     else:
                         users = []
+                    if not isinstance(users, list):
+                        users = []
+                    # Solo objetos tipo usuario; otros ítems rompen .get() y el calendario espera dicts
+                    users = [u for u in users if isinstance(u, dict)]
                     
                     # Ordenar usuarios por nombre
-                    def obtener_nombre_usuario(user):
-                        """Obtiene el nombre del usuario para ordenación"""
-                        return (user.get('name') or user.get('username') or user.get('nombre') or '').lower()
+                    def obtener_nombre_usuario(user: Dict[str, Any]) -> str:
+                        return (
+                            user.get("name")
+                            or user.get("username")
+                            or user.get("nombre")
+                            or ""
+                        ).lower()
                     
                     users_ordenados = sorted(users, key=obtener_nombre_usuario)
                     

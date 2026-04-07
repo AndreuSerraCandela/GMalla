@@ -762,9 +762,9 @@ Responde SOLO con el JSON válido, sin texto adicional antes o después."""
                         
                         # Sincronizar con BC
                         if self.bc_client:
-                            exito = self.bc_client.actualizar_incidencia(incidencia)
+                            exito, error_msg = self.bc_client.actualizar_incidencia(incidencia)
                             if not exito:
-                                errores.append(f"Error al sincronizar incidencia {incidencia.no} con BC")
+                                errores.append(error_msg or f"Error al sincronizar incidencia {incidencia.no} con BC")
                         
                         asignaciones_aplicadas.append({
                             'incidencia_id': incidencia_id,
@@ -776,6 +776,15 @@ Responde SOLO con el JSON válido, sin texto adicional antes o después."""
                         
                     except Exception as e:
                         errores.append(f"Error al aplicar asignación {asignacion}: {str(e)}")
+                
+                if asignaciones_aplicadas:
+                    try:
+                        from apiwhats_client import notificar_whatsapp_asignaciones_automaticas
+                        notificar_whatsapp_asignaciones_automaticas(
+                            self.gtask_client, asignaciones_aplicadas, self.bc_client
+                        )
+                    except Exception as e_wa:
+                        print(f"⚠️ WhatsApp (asignación automática): {e_wa}")
             
             resultado = {
                 'success': True,

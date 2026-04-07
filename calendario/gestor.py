@@ -241,11 +241,11 @@ class GestorCalendario:
             # Sincronizar con Business Central si está configurado
             if sincronizar_bc and self.bc_client:
                 try:
-                    exito = self.bc_client.actualizar_incidencia(incidencia)
+                    exito, error_msg = self.bc_client.actualizar_incidencia(incidencia)
                     if exito:
                         print(f"✅  sincronizados con Business Central")
                     else:
-                        print(f"⚠️ No se pudieron sincronizar los cambios con Business Central")
+                        print(f"⚠️ No se pudieron sincronizar los cambios con Business Central: {error_msg or ''}")
                 except Exception as e:
                     print(f"❌ Error al sincronizar con Business Central: {str(e)}")
             

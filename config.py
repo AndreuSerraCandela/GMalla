@@ -26,9 +26,38 @@ BUSINESS_CENTRAL_PASSWORD = os.getenv("BUSINESS_CENTRAL_PASSWORD", "Ib6343ds.")
 GTASK_API_URL = os.getenv("GTASK_API_URL", "https://gtasks-api.deploy.malla.es")
 GTASK_USERNAME = os.getenv("GTASK_USERNAME", "andreuserra")
 GTASK_PASSWORD = os.getenv("GTASK_PASSWORD", "12345")
+# Departamento GTask «Taller» (ObjectId en API de usuarios)
+GTASK_DEPARTAMENTO_TALLER_ID = os.getenv(
+    "GTASK_DEPARTAMENTO_TALLER_ID",
+    "6536459ad826e80019f16725",
+).strip()
+
+# Administradores: solo estos usuarios pueden gestionar permisos (usernames separados por coma)
+_ADMINISTRADORES_STR = os.getenv("ADMINISTRADORES", "andreuserra,lllompart@malla.es")
+ADMINISTRADORES = {s.strip().lower() for s in _ADMINISTRADORES_STR.split(",") if s.strip()}
+
+# Fichero donde se guardan los permisos por usuario
+PERMISOS_FILE = BASE_DIR / "permisos.json"
 
 # Configuración de LLM local
 LLM_BASE_URL = os.getenv("LLM_BASE_URL", "http://192.168.10.238:1234")
+
+# API WhatsApp (Apiwhats: POST /enviar). Vacío = no se envían avisos.
+API_WHATS_URL = os.getenv("API_WHATS_URL", "").strip()
+API_WHATS_SECRET_TOKEN = os.getenv("API_WHATS_SECRET_TOKEN", "").strip()
+WHATSAPP_NOTIFICAR_ASIGNACION = os.getenv("WHATSAPP_NOTIFICAR_ASIGNACION", "true").lower() in (
+    "1",
+    "true",
+    "yes",
+    "on",
+)
+# Tras enviar WhatsApp (Apiwhats), notificar a BC (postRespuestaWhatsApp) con id_mensaje + id_incidencia
+WHATSAPP_NOTIFICAR_BC = os.getenv("WHATSAPP_NOTIFICAR_BC", "true").lower() in (
+    "1",
+    "true",
+    "yes",
+    "on",
+)
 
 # Configuración de base de datos (si se necesita almacenamiento local)
 DATABASE_URL = os.getenv("DATABASE_URL", f"sqlite:///{BASE_DIR / 'gmalla.db'}")
@@ -37,6 +66,10 @@ DATABASE_URL = os.getenv("DATABASE_URL", f"sqlite:///{BASE_DIR / 'gmalla.db'}")
 BC_CONFIG = {
     'base_url': BUSINESS_CENTRAL_BASE_URL,
     'endpoint_incidences': os.getenv("BUSINESS_CENTRAL_ENDPOINT_INCIDENCES", "/powerbi/ODataV4/GtaskMalla_PostIncidencia"),
+    'endpoint_post_respuesta_whatsapp': os.getenv(
+        "BUSINESS_CENTRAL_ENDPOINT_POST_RESPUESTA_WHATSAPP",
+        "/powerbi/ODataV4/GtaskMalla_postRespuestaWhatsApp",
+    ),
     'company': BUSINESS_CENTRAL_COMPANY,
     'credentials': {
         'username': BUSINESS_CENTRAL_USERNAME,
@@ -80,6 +113,18 @@ def get_bc_detalle_incidences_url() -> str:
         endpoint = '/' + endpoint
     incidences_url = f"{base_url}{endpoint}"
     return incidences_url
+def get_bc_post_respuesta_whatsapp_url() -> str:
+    """URL OData del servicio web postRespuestaWhatsApp (mismo criterio que Apiwhats → BC)."""
+    base_url = get_bc_url().rstrip("/")
+    endpoint = BC_CONFIG.get(
+        "endpoint_post_respuesta_whatsapp",
+        "/powerbi/ODataV4/GtaskMalla_postRespuestaWhatsApp",
+    )
+    if not endpoint.startswith("/"):
+        endpoint = "/" + endpoint
+    return f"{base_url}{endpoint}"
+
+
 def get_bc_lista_incidencias_url() -> str:
     """
     Obtiene la URL del endpoint OData para listar incidencias en Business Central.

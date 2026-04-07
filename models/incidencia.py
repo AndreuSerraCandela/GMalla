@@ -35,7 +35,9 @@ class Incidencia:
     tipo_elemento: TipoElemento = TipoElemento.RECURSO  # Option
     fecha_hora: Optional[datetime] = None  # DateTime
     work_description: Optional[bytes] = None  # Blob
-    usuario: Optional[str] = None  # Guid
+    usuario: Optional[str] = None  # Guid - usuario asignado
+    usuario_creador: Optional[str] = None  # Guid - usuario que creó/registró la incidencia
+    comunicado_por_emt: Optional[bool] = None  # Comunicado por EMT (desde BC)
     archivos_imagen: list[str] = field(default_factory=list)  # Archivos de imagen asociados
     url_primera_imagen: Optional[str] = None  # URL de la primera imagen para miniatura
     
@@ -54,6 +56,8 @@ class Incidencia:
             "Tipo Elemento": self.tipo_elemento.value,
             "FechaHora": self.fecha_hora.isoformat() if self.fecha_hora else None,
             "Usuario": self.usuario,
+            "UsuarioCreador": self.usuario_creador,
+            "ComunicadoPorEMT": self.comunicado_por_emt,
             "ArchivosImagen": self.archivos_imagen,
             "URL_Primera_Imagen": self.url_primera_imagen
         }
@@ -93,8 +97,13 @@ class Incidencia:
                     pass
             else:
                 incidencia.fecha_hora = fecha_hora
-        # Usuario: puede venir como "Usuario" o ya procesado desde OData
+        # Usuario asignado: Id_Uduario_Gtask_Asignado (en BC se envía como Usuario en nuestro dict interno)
         incidencia.usuario = data.get("Usuario")
+        # Usuario creador: Id_Uduario_Gtask (en BC no existe UsuarioCreador; lo mapeamos desde Id_Uduario_Gtask)
+        incidencia.usuario_creador = data.get("UsuarioCreador")
+        # Comunicado por EMT (BC: Comunicado_por_EMT)
+        val_emt = data.get("ComunicadoPorEMT") if "ComunicadoPorEMT" in data else data.get("Comunicado_por_EMT")
+        incidencia.comunicado_por_emt = bool(val_emt) if val_emt is not None else None
         # Si hay fecha en el diccionario, usarla (ya procesada desde Fecha_Hora)
         if data.get("Fecha"):
             fecha_str = data["Fecha"]

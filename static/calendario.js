@@ -7,9 +7,18 @@ let estado = {
     autenticado: false,
     usuarioActual: null,
     usuariosFiltrados: null, // null = todos, Set de IDs = usuarios filtrados
-    miniCalendarioMes: null, // Mes del mini calendario (0-11)
-    miniCalendarioAño: null, // Año del mini calendario
-    vistaSimple: false // Vista simple activada/desactivada
+    permisos: null,  // { tipos_incidencia_visible, comunicado_por_emt_visible, puede_modificar, puede_asignar, puede_imprimir }
+    isAdmin: false,
+    miniCalendarioMes: null,
+    miniCalendarioAño: null,
+    vistaSimple: false,
+    tipoVista: 'lista'
+};
+// Estado para vista lista: filtro y ordenación
+let vistaListaEstado = {
+    filtro: '',
+    sortCol: 'fecha',
+    sortDir: -1 // -1 desc, 1 asc
 };
 
 // Inicialización
@@ -86,11 +95,48 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('semana-anterior-btn').addEventListener('click', semanaAnterior);
     document.getElementById('semana-siguiente-btn').addEventListener('click', semanaSiguiente);
     
-    // Toggle vista simple
-    document.getElementById('vista-simple-btn').addEventListener('click', toggleVistaSimple);
+    // Selector de vista: Lista, Simple, Calendario
+    const vistaTipoSelect = document.getElementById('vista-tipo-select');
+    if (vistaTipoSelect) {
+        vistaTipoSelect.value = estado.tipoVista || 'lista';
+        vistaTipoSelect.addEventListener('change', () => cambiarTipoVista(vistaTipoSelect.value));
+    }
     
     // Cargar filtro guardado
     cargarFiltroUsuarios();
+    
+    // Panel lateral arriba a la derecha (abrir/cerrar)
+    const sidebarPanel = document.getElementById('sidebar-panel');
+    const navbarPanelBtn = document.getElementById('navbar-panel-btn');
+    const sidebarPanelCerrar = document.getElementById('sidebar-panel-cerrar');
+    if (sidebarPanel && navbarPanelBtn) {
+        const saved = localStorage.getItem('gmalla-panel-abierto');
+        if (saved === '1') sidebarPanel.classList.add('abierto');
+        navbarPanelBtn.addEventListener('click', () => {
+            sidebarPanel.classList.toggle('abierto');
+            localStorage.setItem('gmalla-panel-abierto', sidebarPanel.classList.contains('abierto') ? '1' : '0');
+        });
+        if (sidebarPanelCerrar) {
+            sidebarPanelCerrar.addEventListener('click', () => {
+                sidebarPanel.classList.remove('abierto');
+                localStorage.setItem('gmalla-panel-abierto', '0');
+            });
+        }
+    }
+    // Botón Permisos (solo visible para admins)
+    const permisosBtn = document.getElementById('navbar-permisos-btn');
+    if (permisosBtn) {
+        permisosBtn.addEventListener('click', abrirModalPermisos);
+    }
+    document.getElementById('permisos-modal-close').addEventListener('click', cerrarModalPermisos);
+    document.getElementById('permisos-guardar-btn').addEventListener('click', guardarPermisos);
+    window.addEventListener('click', (e) => {
+        const modalPermisos = document.getElementById('permisos-modal');
+        if (e.target === modalPermisos) cerrarModalPermisos();
+    });
+    
+    // Mostrar vista inicial (Lista por defecto)
+    actualizarVista();
 });
 
 // Verificar estado de autenticación
@@ -103,10 +149,12 @@ async function verificarAutenticacion() {
             estado.autenticado = true;
             estado.usuarioActual = data.user_data;
             actualizarUIAutenticacion();
+            await cargarPermisos();
             cargarDatos();
         } else {
             estado.autenticado = false;
             actualizarUIAutenticacion();
+            await cargarPermisos(); // permisos por defecto cuando no hay sesión
         }
     } catch (error) {
         console.error('Error al verificar autenticación:', error);
@@ -135,6 +183,7 @@ async function realizarLoginAutomatico(username, password) {
             estado.autenticado = true;
             estado.usuarioActual = data.user_data;
             actualizarUIAutenticacion();
+            await cargarPermisos();
             cargarDatos();
             console.log('✅ Login automático exitoso');
         } else {
@@ -145,10 +194,155 @@ async function realizarLoginAutomatico(username, password) {
     }
 }
 
+// Cargar permisos del usuario actual (y si es admin)
+async function cargarPermisos() {
+    try {
+        const response = await fetch('/api/permisos');
+        const data = await response.json();
+        if (data.success) {
+            estado.permisos = data.permisos || {};
+            estado.isAdmin = !!data.is_admin;
+        } else {
+            estado.permisos = { comunicado_por_emt_visible: true, puede_modificar: true, puede_asignar: true, puede_imprimir: true, tipos_incidencia_visible: null };
+            estado.isAdmin = false;
+        }
+    } catch (e) {
+        estado.permisos = { comunicado_por_emt_visible: true, puede_modificar: true, puede_asignar: true, puede_imprimir: true, tipos_incidencia_visible: null };
+        estado.isAdmin = false;
+    }
+    actualizarUIAutenticacion();
+    aplicarPermisosUI();
+}
+
+// Aplicar permisos en la UI: ocultar filtros y deshabilitar botones según permisos
+function aplicarPermisosUI() {
+    const p = estado.permisos || {};
+    const containerEMT = document.getElementById('filtro-comunicado-emt-container');
+    if (containerEMT) containerEMT.style.display = (p.comunicado_por_emt_visible !== false) ? 'block' : 'none';
+    const asignarAutoBtn = document.getElementById('asignar-automatico-btn');
+    const reasignarAutoBtn = document.getElementById('reasignar-automatico-btn');
+    if (asignarAutoBtn) asignarAutoBtn.style.display = (p.puede_asignar !== false) ? '' : 'none';
+    if (reasignarAutoBtn) reasignarAutoBtn.style.display = (p.puede_asignar !== false) ? '' : 'none';
+    // Tipos de incidencia y botones modificar/imprimir se aplican al generar vistas
+}
+
+// --- Modal de Permisos (solo administradores) ---
+function abrirModalPermisos() {
+    if (!estado.isAdmin) return;
+    const modal = document.getElementById('permisos-modal');
+    document.getElementById('permisos-loading').style.display = 'block';
+    document.getElementById('permisos-content').style.display = 'none';
+    modal.style.display = 'block';
+    cargarPermisosAdmin();
+}
+
+function cerrarModalPermisos() {
+    document.getElementById('permisos-modal').style.display = 'none';
+}
+
+async function cargarPermisosAdmin() {
+    const loading = document.getElementById('permisos-loading');
+    const content = document.getElementById('permisos-content');
+    try {
+        const [resUsers, resPermisos] = await Promise.all([
+            fetch('/api/permisos/admin/usuarios'),
+            fetch('/api/permisos/admin')
+        ]);
+        const dataUsers = await resUsers.json();
+        const dataPermisos = await resPermisos.json();
+        if (!dataUsers.success || !dataPermisos.success) {
+            loading.textContent = dataUsers.error || dataPermisos.error || 'Error al cargar';
+            return;
+        }
+        const usuarios = dataUsers.usuarios || [];
+        const permisos = dataPermisos.permisos || {};
+        const tiposIncidencia = obtenerTiposIncidenciaUnicos();
+        const container = document.getElementById('permisos-lista-usuarios');
+        container.innerHTML = '';
+        usuarios.forEach(u => {
+            const uid = String(u.id || u.user_id || u.userId || u._id || '');
+            const uname = (u.username || u.email || u.name || u.nombre || uid).trim();
+            const key = uid || uname.toLowerCase();
+            const p = permisos[key] || permisos[uid] || permisos[uname] || {};
+            const tipList = p.tipos_incidencia_visible;
+            const todosTipos = !Array.isArray(tipList) || tipList.length === 0;
+            const tiposPermitidosSet = new Set(Array.isArray(tipList) ? tipList.map(t => String(t).trim()) : []);
+            const tiposCheckboxes = tiposIncidencia.length === 0
+                ? '<p class="permisos-tipos-aviso">No hay tipos cargados. Refresca las incidencias para ver la lista.</p>'
+                : '<div class="permisos-tipos-lista">' + tiposIncidencia.map(tipo => {
+                    const checked = todosTipos || tiposPermitidosSet.has(String(tipo).trim());
+                    return `<label class="permisos-tipo-item"><input type="checkbox" data-key="${escapeHtml(key)}" data-opt="tipos_incidencia_visible" value="${escapeHtml(tipo)}" ${checked ? 'checked' : ''}> ${escapeHtml(tipo)}</label>`;
+                }).join('') + '</div>';
+            const div = document.createElement('div');
+            div.className = 'permisos-usuario';
+            div.innerHTML = `
+                <div class="permisos-usuario-nombre">${escapeHtml(uname)}</div>
+                <div class="permisos-usuario-campos">
+                    <label><input type="checkbox" data-key="${escapeHtml(key)}" data-opt="comunicado_por_emt_visible" ${(p.comunicado_por_emt_visible !== false) ? 'checked' : ''}> Ver Comunicado por EMT</label>
+                    <label><input type="checkbox" data-key="${escapeHtml(key)}" data-opt="puede_modificar" ${(p.puede_modificar !== false) ? 'checked' : ''}> Modificar incidencias</label>
+                    <label><input type="checkbox" data-key="${escapeHtml(key)}" data-opt="puede_asignar" ${(p.puede_asignar !== false) ? 'checked' : ''}> Asignar incidencias</label>
+                    <label><input type="checkbox" data-key="${escapeHtml(key)}" data-opt="puede_imprimir" ${(p.puede_imprimir !== false) ? 'checked' : ''}> Imprimir incidencias</label>
+                    <div class="permisos-tipos"><label>Tipos visibles (todos marcados = todos):</label>${tiposCheckboxes}</div>
+                </div>
+            `;
+            container.appendChild(div);
+        });
+        loading.style.display = 'none';
+        content.style.display = 'block';
+    } catch (e) {
+        loading.textContent = 'Error: ' + (e.message || e);
+    }
+}
+
+async function guardarPermisos() {
+    const btn = document.getElementById('permisos-guardar-btn');
+    const msg = document.getElementById('permisos-mensaje');
+    const container = document.getElementById('permisos-lista-usuarios');
+    const tiposIncidencia = obtenerTiposIncidenciaUnicos();
+    const permisos = {};
+    container.querySelectorAll('.permisos-usuario').forEach(div => {
+        const key = div.querySelector('[data-opt="comunicado_por_emt_visible"]')?.dataset?.key;
+        if (!key) return;
+        const tiposChecked = Array.from(div.querySelectorAll('input[data-opt="tipos_incidencia_visible"]:checked')).map(cb => cb.value.trim()).filter(Boolean);
+        const todosMarcados = tiposIncidencia.length > 0 && tiposChecked.length === tiposIncidencia.length;
+        permisos[key] = {
+            comunicado_por_emt_visible: !!div.querySelector('input[data-opt="comunicado_por_emt_visible"]')?.checked,
+            puede_modificar: !!div.querySelector('input[data-opt="puede_modificar"]')?.checked,
+            puede_asignar: !!div.querySelector('input[data-opt="puede_asignar"]')?.checked,
+            puede_imprimir: !!div.querySelector('input[data-opt="puede_imprimir"]')?.checked,
+            tipos_incidencia_visible: (tiposIncidencia.length === 0 || todosMarcados) ? null : tiposChecked
+        };
+    });
+    btn.disabled = true;
+    msg.textContent = 'Guardando...';
+    msg.className = 'guardar-mensaje';
+    try {
+        const res = await fetch('/api/permisos/admin', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(permisos)
+        });
+        const data = await res.json();
+        if (data.success) {
+            msg.textContent = '✅ ' + (data.message || 'Guardado correctamente');
+            msg.className = 'guardar-mensaje guardar-mensaje-success';
+            await cargarPermisos();
+        } else {
+            msg.textContent = '❌ ' + (data.error || 'Error al guardar');
+            msg.className = 'guardar-mensaje guardar-mensaje-error';
+        }
+    } catch (e) {
+        msg.textContent = '❌ ' + (e.message || e);
+        msg.className = 'guardar-mensaje guardar-mensaje-error';
+    }
+    btn.disabled = false;
+}
+
 // Actualizar UI de autenticación
 function actualizarUIAutenticacion() {
     const loginIcon = document.getElementById('login-icon');
     const userIcon = document.getElementById('user-icon');
+    const permisosBtn = document.getElementById('navbar-permisos-btn');
     
     if (estado.autenticado && estado.usuarioActual) {
         loginIcon.style.display = 'none';
@@ -159,9 +353,11 @@ function actualizarUIAutenticacion() {
                      'Usuario';
         userIcon.title = nombre;
         userIcon.setAttribute('data-usuario', nombre);
+        if (permisosBtn) permisosBtn.style.display = estado.isAdmin ? 'flex' : 'none';
     } else {
         loginIcon.style.display = 'flex';
         userIcon.style.display = 'none';
+        if (permisosBtn) permisosBtn.style.display = 'none';
         loginIcon.title = 'Iniciar Sesión';
     }
 }
@@ -204,6 +400,7 @@ async function realizarLogin(e) {
             estado.autenticado = true;
             estado.usuarioActual = data.user_data;
             actualizarUIAutenticacion();
+            await cargarPermisos();
             cerrarModal();
             cargarDatos(); // Recargar datos con autenticación
         } else {
@@ -229,12 +426,14 @@ async function cerrarSesion() {
         if (data.success) {
             estado.autenticado = false;
             estado.usuarioActual = null;
+            estado.permisos = null;
+            estado.isAdmin = false;
             actualizarUIAutenticacion();
             // Limpiar datos
             estado.usuarios = [];
             estado.incidencias = [];
             estado.asignaciones = {};
-            generarCalendario();
+            actualizarVista();
         }
     } catch (error) {
         console.error('Error al cerrar sesión:', error);
@@ -251,71 +450,96 @@ async function cargarDatos() {
     // Actualizar lista de filtro después de cargar usuarios
     actualizarListaFiltroUsuarios();
     
-    // Generar calendario principal primero
-    generarCalendario();
+    // Mostrar vista actual (lista o calendario)
+    actualizarVista();
     
     // Generar sidebar (el mini calendario se sincronizará automáticamente con la semana visible)
     generarFiltrosTipos();
+
+    if (estado.autenticado) {
+        intentarAbrirDetalleDesdeUrl();
+    }
+}
+
+/** Lee ?id= de la URL (Id_Gtask u otro identificador de incidencia). */
+function obtenerIdIncidenciaDesdeUrl() {
+    const id = new URLSearchParams(window.location.search).get('id');
+    if (!id) return null;
+    const t = String(id).trim();
+    return t || null;
+}
+
+/** Quita el parámetro id de la barra de dirección sin recargar. */
+function quitarParamIdDeLaUrl() {
+    const url = new URL(window.location.href);
+    if (!url.searchParams.has('id')) return;
+    url.searchParams.delete('id');
+    const q = url.searchParams.toString();
+    const newPath = url.pathname + (q ? `?${q}` : '') + url.hash;
+    window.history.replaceState(null, '', newPath);
+}
+
+/** Si la URL trae ?id=..., abre el modal de detalle (tras login y datos cargados). */
+function intentarAbrirDetalleDesdeUrl() {
+    const id = obtenerIdIncidenciaDesdeUrl();
+    if (!id) return;
+    quitarParamIdDeLaUrl();
+    abrirDetalleIncidencia(id);
+}
+
+function ordenarUsuariosPorNombre(arr) {
+    return [...(arr || [])].sort((a, b) => {
+        const nombreA = (a.name || a.username || a.nombre || '').toLowerCase();
+        const nombreB = (b.name || b.username || b.nombre || '').toLowerCase();
+        return nombreA.localeCompare(nombreB, 'es', { sensitivity: 'base' });
+    });
+}
+
+function usuariosFallbackDesdeIncidencias() {
+    const usuariosUnicos = new Map();
+    (estado.incidencias || []).forEach(inc => {
+        if (inc.usuario) {
+            if (!usuariosUnicos.has(inc.usuario)) {
+                const idStr = String(inc.usuario);
+                usuariosUnicos.set(inc.usuario, {
+                    id: inc.usuario,
+                    name: `Usuario ${idStr.substring(0, 8)}`
+                });
+            }
+        }
+    });
+    estado.usuarios = ordenarUsuariosPorNombre(Array.from(usuariosUnicos.values()));
+    console.log('✅ Usuarios extraídos de incidencias:', estado.usuarios.length, '(ordenados por nombre)');
 }
 
 // Cargar usuarios desde la API
 async function cargarUsuarios() {
     try {
         const response = await fetch('/api/usuarios');
-        const data = await response.json();
-        
-        if (data.success && data.usuarios && data.usuarios.length > 0) {
-            // Ordenar usuarios por nombre
-            estado.usuarios = data.usuarios.sort((a, b) => {
-                const nombreA = (a.name || a.username || a.nombre || '').toLowerCase();
-                const nombreB = (b.name || b.username || b.nombre || '').toLowerCase();
-                return nombreA.localeCompare(nombreB, 'es', { sensitivity: 'base' });
-            });
-            console.log('✅ Usuarios cargados:', estado.usuarios.length, '(ordenados por nombre)');
-        } else {
-            console.warn('⚠️ No se pudieron cargar usuarios desde la API, extrayendo de incidencias...');
-            // Extraer usuarios únicos de las incidencias
-            const usuariosUnicos = new Map();
-            estado.incidencias.forEach(inc => {
-                if (inc.usuario) {
-                    if (!usuariosUnicos.has(inc.usuario)) {
-                        usuariosUnicos.set(inc.usuario, {
-                            id: inc.usuario,
-                            name: `Usuario ${inc.usuario.substring(0, 8)}`
-                        });
-                    }
-                }
-            });
-            estado.usuarios = Array.from(usuariosUnicos.values());
-            // Ordenar usuarios por nombre
-            estado.usuarios.sort((a, b) => {
-                const nombreA = (a.name || a.username || a.nombre || '').toLowerCase();
-                const nombreB = (b.name || b.username || b.nombre || '').toLowerCase();
-                return nombreA.localeCompare(nombreB, 'es', { sensitivity: 'base' });
-            });
-            console.log('✅ Usuarios extraídos de incidencias:', estado.usuarios.length, '(ordenados por nombre)');
+        let data = {};
+        try {
+            data = await response.json();
+        } catch (e) {
+            console.warn('⚠️ /api/usuarios: respuesta no es JSON (HTTP ' + response.status + ')');
+            usuariosFallbackDesdeIncidencias();
+            return;
         }
+        // Éxito con lista (puede estar vacía): no usar fallback por "length === 0"
+        if (data.success === true && Array.isArray(data.usuarios)) {
+            estado.usuarios = ordenarUsuariosPorNombre(data.usuarios);
+            if (estado.usuarios.length === 0) {
+                console.warn('⚠️ GTask devolvió 0 usuarios. ¿Sesión iniciada en GTask? (La API /users suele exigir Bearer)');
+            } else {
+                console.log('✅ Usuarios cargados:', estado.usuarios.length, '(ordenados por nombre)');
+            }
+            return;
+        }
+        const detalle = data.error || response.statusText || 'Error desconocido';
+        console.warn('⚠️ No se pudieron cargar usuarios desde la API (' + response.status + '):', detalle);
+        usuariosFallbackDesdeIncidencias();
     } catch (error) {
         console.error('❌ Error al cargar usuarios:', error);
-        // Extraer usuarios de incidencias como fallback
-        const usuariosUnicos = new Map();
-        estado.incidencias.forEach(inc => {
-            if (inc.usuario) {
-                if (!usuariosUnicos.has(inc.usuario)) {
-                    usuariosUnicos.set(inc.usuario, {
-                        id: inc.usuario,
-                        name: `Usuario ${inc.usuario.substring(0, 8)}`
-                    });
-                }
-            }
-        });
-        estado.usuarios = Array.from(usuariosUnicos.values());
-        // Ordenar usuarios por nombre
-        estado.usuarios.sort((a, b) => {
-            const nombreA = (a.name || a.username || a.nombre || '').toLowerCase();
-            const nombreB = (b.name || b.username || b.nombre || '').toLowerCase();
-            return nombreA.localeCompare(nombreB, 'es', { sensitivity: 'base' });
-        });
+        usuariosFallbackDesdeIncidencias();
     }
 }
 
@@ -345,7 +569,8 @@ async function cargarIncidencias() {
             
             // Organizar incidencias por usuario y fecha
             organizarIncidencias();
-            mostrarIncidenciasLibres();
+            // Actualizar la vista activa (lista o calendario)
+            actualizarVista();
         } else {
             console.error('Error al cargar incidencias:', data.error);
             estado.incidencias = [];
@@ -890,6 +1115,26 @@ function generarCalendario() {
 
 // Función para verificar si una incidencia debe mostrarse según los filtros
 function debeMostrarIncidencia(incidencia) {
+    // Permisos: si el usuario tiene tipos_incidencia_visible definido, solo mostrar esos tipos
+    const tiposPermitidos = estado.permisos && estado.permisos.tipos_incidencia_visible;
+    if (Array.isArray(tiposPermitidos) && tiposPermitidos.length > 0) {
+        const tipo = (incidencia.tipo_incidencia || '').trim();
+        if (!tiposPermitidos.some(t => String(t).trim() === tipo)) return false;
+    }
+    // Filtro Comunicado por EMT: si solo está marcado "Sí" o solo "No", filtrar
+    const containerEMT = document.getElementById('filtro-comunicado-emt-container');
+    if (containerEMT) {
+        const cbSi = document.getElementById('filtro-comunicado-emt-si');
+        const cbNo = document.getElementById('filtro-comunicado-emt-no');
+        if (cbSi && cbNo) {
+            const soloSi = cbSi.checked && !cbNo.checked;
+            const soloNo = cbNo.checked && !cbSi.checked;
+            const valorEMT = incidencia.comunicado_por_emt === true;
+            if (soloSi && !valorEMT) return false;
+            if (soloNo && valorEMT) return false;
+        }
+    }
+    
     const checkboxes = document.querySelectorAll('.filtro-tipo-checkbox');
     if (checkboxes.length === 0) return true; // Si no hay filtros, mostrar todas
     
@@ -1065,7 +1310,7 @@ function crearElementoIncidencia(incidencia, usuarioId, fecha) {
     // Mostrar descripción como elemento principal (más importante)
     const descripcion = incidencia.descripcion || 'Sin descripción';
     const descripcionCorta = descripcion.length > 80 ? descripcion.substring(0, 80) + '...' : descripcion;
-    const recurso = incidencia.recurso || 'N/A';
+    const recurso = formatearRecursoDisplay(incidencia);
     
     // Formatear hora si existe fecha_hora
     let horaHTML = '';
@@ -1227,19 +1472,207 @@ function crearElementoIncidencia(incidencia, usuarioId, fecha) {
     return div;
 }
 
-// Toggle vista simple
-function toggleVistaSimple() {
-    estado.vistaSimple = !estado.vistaSimple;
-    const btn = document.getElementById('vista-simple-btn');
-    if (estado.vistaSimple) {
-        btn.textContent = '🖼️ Vista Normal';
-        btn.title = 'Cambiar a vista normal';
+// Cambiar tipo de vista: lista (principal), simple, calendario
+function cambiarTipoVista(tipo) {
+    estado.tipoVista = tipo;
+    estado.vistaSimple = (tipo === 'simple');
+    const vistaTipoSelect = document.getElementById('vista-tipo-select');
+    if (vistaTipoSelect) vistaTipoSelect.value = tipo;
+    actualizarVista();
+}
+
+// Mostrar/ocultar contenedores según tipoVista y rellenar contenido
+function actualizarVista() {
+    const listaContainer = document.getElementById('vista-lista-container');
+    const calendarioWrapper = document.getElementById('vista-calendario-wrapper');
+    const controls = document.querySelector('.controls');
+    if (estado.tipoVista === 'lista') {
+        if (listaContainer) listaContainer.style.display = 'block';
+        if (calendarioWrapper) calendarioWrapper.style.display = 'none';
+        if (controls) controls.style.display = 'none';
+        generarVistaLista();
+        initVistaListaFiltroYOrden();
     } else {
-        btn.textContent = '📋 Vista Simple';
-        btn.title = 'Cambiar a vista simple';
+        if (listaContainer) listaContainer.style.display = 'none';
+        if (calendarioWrapper) calendarioWrapper.style.display = 'block';
+        if (controls) controls.style.display = 'flex';
+        generarCalendario();
+        mostrarIncidenciasLibres();
     }
-    // Regenerar calendario para aplicar los cambios
-    generarCalendario();
+}
+
+// Generar tabla de la vista lista: filtrable, ordenable por columnas, con Tipo de incidencia
+function generarVistaLista() {
+    const tbody = document.getElementById('vista-lista-body');
+    const inputFiltro = document.getElementById('vista-lista-input-filtro');
+    if (!tbody) return;
+    if (inputFiltro) vistaListaEstado.filtro = inputFiltro.value.trim().toLowerCase();
+    tbody.innerHTML = '';
+    let incidencias = (estado.incidencias || []).filter(inc => debeMostrarIncidencia(inc));
+    // Aplicar filtro de texto (busca en no, descripción, tipo, recurso, dirección, usuario)
+    if (vistaListaEstado.filtro) {
+        const q = vistaListaEstado.filtro;
+        const nombreUsuario = (id) => {
+            const u = estado.usuarios.find(us => String(us.id || us.user_id || us.userId || us._id || '').indexOf(String(id)) !== -1 || String(id).indexOf(String(us.id || us.user_id || '')) !== -1);
+            return u ? (u.name || u.username || u.nombre || '') : '';
+        };
+        incidencias = incidencias.filter(inc => {
+            const no = (inc.no || '').toLowerCase();
+            const desc = (inc.descripcion || '').toLowerCase();
+            const tipo = (inc.tipo_incidencia || '').toLowerCase();
+            const recursoNombre = (inc.resource_name || '').toLowerCase();
+            const recursoNum = (inc.recurso || '').toLowerCase();
+            const dir = (inc.direccion || inc.address || '').toLowerCase();
+            const user = (inc.usuario || '').toLowerCase();
+            const userNombre = nombreUsuario(inc.usuario).toLowerCase();
+            const creador = (inc.usuario_creador || '').toLowerCase();
+            const creadorNombre = nombreUsuario(inc.usuario_creador).toLowerCase();
+            const comunicadoEMT = (inc.comunicado_por_emt ? 'sí' : 'no');
+            return no.includes(q) || desc.includes(q) || tipo.includes(q)
+                || recursoNombre.includes(q) || recursoNum.includes(q)
+                || dir.includes(q) || user.includes(q) || userNombre.includes(q) || creador.includes(q) || creadorNombre.includes(q)
+                || comunicadoEMT.includes(q);
+        });
+    }
+    // Ordenar
+    const col = vistaListaEstado.sortCol;
+    const dir = vistaListaEstado.sortDir;
+    const getVal = (inc, c) => {
+        if (c === 'no') return (inc.no || inc.id_gtask || '').toLowerCase();
+        if (c === 'fecha') return inc.fecha_hora ? new Date(inc.fecha_hora).getTime() : (inc.fecha ? new Date(inc.fecha).getTime() : 0);
+        if (c === 'descripcion') return (inc.descripcion || '').toLowerCase();
+        if (c === 'tipo') return (inc.tipo_incidencia || '').toLowerCase();
+        if (c === 'comunicado_emt') return inc.comunicado_por_emt ? 'sí' : 'no';
+        if (c === 'recurso') return (inc.resource_name || inc.recurso || '').toLowerCase();
+        if (c === 'usuario_creador') return (obtenerNombreUsuario(inc.usuario_creador) || '').toLowerCase();
+        if (c === 'usuario') return (obtenerNombreUsuario(inc.usuario) || '').toLowerCase();
+        return '';
+    };
+    incidencias.sort((a, b) => {
+        const va = getVal(a, col);
+        const vb = getVal(b, col);
+        let cmp = 0;
+        if (typeof va === 'number' && typeof vb === 'number') cmp = va - vb;
+        else cmp = String(va).localeCompare(String(vb), 'es', { sensitivity: 'base' });
+        return dir < 0 ? -cmp : cmp;
+    });
+    // Actualizar iconos de ordenación en thead
+    document.querySelectorAll('.vista-lista-tabla thead th.sortable').forEach(th => {
+        const span = th.querySelector('.sort-icon');
+        const dataSort = th.getAttribute('data-sort');
+        th.classList.remove('sort-asc', 'sort-desc');
+        if (span) {
+            if (dataSort === vistaListaEstado.sortCol) {
+                th.classList.add(vistaListaEstado.sortDir < 0 ? 'sort-desc' : 'sort-asc');
+                span.textContent = vistaListaEstado.sortDir < 0 ? ' ▼' : ' ▲';
+            } else {
+                span.textContent = '';
+            }
+        }
+    });
+    if (incidencias.length === 0) {
+        const tr = document.createElement('tr');
+        const msgFiltro = vistaListaEstado.filtro ? 'No hay coincidencias con el filtro.' : 'No hay incidencias que mostrar. Usa "Refrescar" para cargar datos.';
+        tr.innerHTML = '<td colspan="9" class="vista-lista-empty">' + msgFiltro + '</td>';
+        tbody.appendChild(tr);
+        return;
+    }
+    incidencias.forEach(inc => {
+        const tr = document.createElement('tr');
+        let fechaStr = '-';
+        if (inc.fecha_hora) {
+            try {
+                const d = new Date(inc.fecha_hora);
+                fechaStr = d.toLocaleString('es-ES', { dateStyle: 'short', timeStyle: 'short' });
+            } catch (e) {
+                if (inc.fecha) fechaStr = inc.fecha;
+            }
+        } else if (inc.fecha) {
+            if (typeof inc.fecha === 'string') fechaStr = inc.fecha;
+            else if (inc.fecha.toISOString) fechaStr = inc.fecha.toISOString().split('T')[0];
+        }
+        const descripcion = (inc.descripcion || '-').substring(0, 120) + ((inc.descripcion && inc.descripcion.length > 120) ? '...' : '');
+        const recurso = formatearRecursoDisplay(inc);
+        const tipoIncidencia = inc.tipo_incidencia || '-';
+        const comunicadoEMT = inc.comunicado_por_emt ? 'Sí' : 'No';
+        const creadoPor = obtenerNombreUsuario(inc.usuario_creador);
+        const usuarioAsignado = obtenerNombreUsuario(inc.usuario);
+        const idGtask = inc.id_gtask || inc.no;
+        const noIncidencia = inc.no || idGtask;
+        const p = estado.permisos || {};
+        const puedeModificar = p.puede_modificar !== false;
+        const puedeImprimir = p.puede_imprimir !== false;
+        const botonesAcciones = [
+            puedeModificar ? `<button type="button" class="btn-editar-lista" data-id-gtask="${escapeHtml(idGtask)}" title="Editar">✎</button>` : '',
+            puedeImprimir ? `<button type="button" class="btn-imprimir-lista" data-id-gtask="${escapeHtml(idGtask)}" title="Imprimir PDF">🖨️</button>` : ''
+        ].filter(Boolean).join('');
+        tr.innerHTML = `
+            <td class="vista-lista-no">${escapeHtml(noIncidencia)}</td>
+            <td class="vista-lista-fecha">${fechaStr}</td>
+            <td class="vista-lista-descripcion" title="${(inc.descripcion || '').replace(/"/g, '&quot;')}">${escapeHtml(descripcion)}</td>
+            <td class="vista-lista-tipo">${escapeHtml(tipoIncidencia)}</td>
+            <td class="vista-lista-comunicado-emt">${comunicadoEMT}</td>
+            <td class="vista-lista-recurso">${escapeHtml(recurso)}</td>
+            <td class="vista-lista-creador">${escapeHtml(creadoPor)}</td>
+            <td class="vista-lista-usuario">${escapeHtml(usuarioAsignado)}</td>
+            <td class="vista-lista-acciones">${botonesAcciones || '—'}</td>
+        `;
+        if (puedeModificar) tr.querySelector('.btn-editar-lista')?.addEventListener('click', () => abrirDetalleIncidencia(idGtask));
+        if (puedeImprimir) tr.querySelector('.btn-imprimir-lista')?.addEventListener('click', async () => {
+            try {
+                const response = await fetch(`/api/detalle-incidencia/${encodeURIComponent(idGtask)}`);
+                const data = await response.json();
+                if (data.success && data.detalle) {
+                    detalleActual = data.detalle;
+                    idGtaskActual = idGtask;
+                    await imprimirPDFPasandoPorActualizar();
+                } else {
+                    alert('No se pudo cargar el detalle para imprimir: ' + (data.error || ''));
+                }
+            } catch (e) {
+                alert('Error al imprimir: ' + (e.message || e));
+            }
+        });
+        tbody.appendChild(tr);
+    });
+}
+
+// Inicializar filtro y ordenación de la vista lista (llamar al cargar la página y al mostrar vista lista)
+function initVistaListaFiltroYOrden() {
+    const inputFiltro = document.getElementById('vista-lista-input-filtro');
+    if (inputFiltro && !inputFiltro.dataset.inited) {
+        inputFiltro.dataset.inited = '1';
+        inputFiltro.addEventListener('input', () => { generarVistaLista(); });
+        inputFiltro.addEventListener('keyup', () => { generarVistaLista(); });
+    }
+    document.querySelectorAll('.vista-lista-tabla thead th.sortable').forEach(th => {
+        if (th.dataset.sortInited) return;
+        th.dataset.sortInited = '1';
+        th.style.cursor = 'pointer';
+        th.addEventListener('click', () => {
+            const col = th.getAttribute('data-sort');
+            if (col === vistaListaEstado.sortCol) vistaListaEstado.sortDir = -vistaListaEstado.sortDir;
+            else { vistaListaEstado.sortCol = col; vistaListaEstado.sortDir = 1; }
+            generarVistaLista();
+        });
+    });
+}
+
+function escapeHtml(text) {
+    if (text == null) return '';
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+/** Formato parada/recurso: descripción (número). Si solo hay uno, solo ese. */
+function formatearRecursoDisplay(obj) {
+    const name = (obj.resource_name || '').trim();
+    const num = (obj.recurso || obj.resource || '').trim();
+    if (name && num) return `${name} (${num})`;
+    if (name) return name;
+    if (num) return num;
+    return '-';
 }
 
 // Mover incidencia
@@ -1274,7 +1707,7 @@ async function moverIncidencia(noIncidencia, usuarioOrigen, fechaOrigen, usuario
             actualizarMensajeOverlay('Actualizando calendario...');
             
             // Regenerar calendario para mostrar los cambios
-            generarCalendario();
+            actualizarVista();
             
             console.log(`✅ Incidencia ${noIncidencia} movida correctamente. Datos refrescados.`);
         } else {
@@ -1322,7 +1755,7 @@ async function moverIncidenciaConHora(noIncidencia, usuarioOrigen, fechaOrigen, 
             actualizarMensajeOverlay('Actualizando calendario...');
             
             // Regenerar calendario para mostrar los cambios
-            generarCalendario();
+            actualizarVista();
             
             console.log(`✅ Incidencia ${noIncidencia} movida correctamente con hora ${nuevaFechaHora}. Datos refrescados.`);
         } else {
@@ -1346,7 +1779,7 @@ function crearElementoIncidenciaSimplificado(incidencia) {
     
     const descripcion = incidencia.descripcion || 'Sin descripción';
     const descripcionCorta = descripcion.length > 10 ? descripcion.substring(0, 10) + '...' : descripcion;
-    const recurso = incidencia.recurso || 'N/A';
+    const recurso = formatearRecursoDisplay(incidencia);
     const urlImagen = incidencia.url_primera_imagen || null;
     
     // Crear tooltip con descripción completa e imagen
@@ -1608,7 +2041,7 @@ async function abrirDetalleIncidencia(idGtask) {
     modal.style.display = 'block';
     
     try {
-        const response = await fetch(`/api/detalle-incidencia/${idGtask}`);
+        const response = await fetch(`/api/detalle-incidencia/${encodeURIComponent(idGtask)}`);
         const data = await response.json();
         
         if (data.success && data.detalle) {
@@ -1666,9 +2099,12 @@ function mostrarDetalleIncidencia(detalle) {
         }
     }
     
-    // Obtener nombre del usuario usando el ID
-    const userId = detalle.user || detalle.user_name;
-    const nombreUsuario = obtenerNombreUsuario(userId);
+    // Usuario creador (solo lectura): Id_Uduario_Gtask; en BC el nombre es "Usuario"
+    const userIdCreador = detalle.Id_Uduario_Gtask || detalle.Id_Usuario_Gtask;
+    const nombreCreador = detalle.Usuario || obtenerNombreUsuario(userIdCreador);
+    // Usuario asignado: ID puede venir en varios campos del detalle BC
+    const userIdAsignado = detalle.Id_Uduario_Gtask_Asignado || detalle.Id_Usuario_Gtask_Asignado || detalle.user_assigned || detalle.user;
+    const nombreUsuario = obtenerNombreUsuario(userIdAsignado);
     
     // Formatear geolocalización (puntoX es longitud, puntoY es latitud) - solo el icono
     let geolocalizacionIcono = '';
@@ -1769,8 +2205,26 @@ function mostrarDetalleIncidencia(detalle) {
                     <p>${detalle.incidenceType || 'N/A'}</p>
                 </div>
                 <div class="detalle-campo" style="flex: 1;">
-                    <label>Usuario:</label>
-                    <p>${nombreUsuario}</p>
+                    <label>Creado por:</label>
+                    <p class="detalle-campo-solo-lectura">${escapeHtml(nombreCreador || 'N/A')}</p>
+                </div>
+            </div>
+            <div style="display: flex; gap: 20px; align-items: flex-start;">
+                <div class="detalle-campo" style="flex: 1;">
+                    <label>Usuario asignado:</label>
+                    <select id="edit-usuario-asignado" class="detalle-input detalle-select-usuario">
+                        <option value="">— Sin asignar —</option>
+                        ${(estado.usuarios || []).map(u => {
+                            const uid = String(u.id || u.user_id || u.userId || u._id || '');
+                            const nom = u.name || u.username || u.nombre || uid;
+                            const sel = (uid && userIdAsignado && (uid === String(userIdAsignado) || uid.includes(String(userIdAsignado)) || String(userIdAsignado).includes(uid))) ? ' selected' : '';
+                            return `<option value="${escapeHtml(uid)}"${sel}>${escapeHtml(nom)}</option>`;
+                        }).join('')}
+                    </select>
+                </div>
+                <div class="detalle-campo" style="flex: 1;">
+                    <label>Comunicado por EMT:</label>
+                    <p class="detalle-campo-solo-lectura">${(detalle.Comunicado_por_EMT || detalle.comunicado_por_emt) ? 'Sí' : 'No'}</p>
                 </div>
             </div>
             <div class="detalle-campo">
@@ -1782,7 +2236,7 @@ function mostrarDetalleIncidencia(detalle) {
                            autocomplete="off">
                     <div id="resource-autocomplete" class="autocomplete-dropdown" style="display: none;"></div>
                 </div>
-                ${detalle.resource_name ? `<p class="detalle-subcampo" id="resource-name-display">${detalle.resource_name}</p>` : '<p class="detalle-subcampo" id="resource-name-display" style="display: none;"></p>'}
+                ${(detalle.resource_name || detalle.resource || detalle.recurso) ? `<p class="detalle-subcampo" id="resource-name-display">${escapeHtml(formatearRecursoDisplay(detalle))}</p>` : '<p class="detalle-subcampo" id="resource-name-display" style="display: none;"></p>'}
             </div>
             <div class="detalle-acciones">
                 <button id="guardar-cambios-btn" class="btn-guardar">💾 Guardar Cambios</button>
@@ -1815,6 +2269,18 @@ function mostrarDetalleIncidencia(detalle) {
             }
         });
     }
+    
+    // Aplicar permisos en el modal: ocultar acciones no permitidas
+    const perm = estado.permisos || {};
+    const detalleAcciones = contenido.querySelector('.detalle-acciones');
+    if (detalleAcciones && perm.puede_modificar === false) detalleAcciones.style.display = 'none';
+    const editUsuarioAsignado = document.getElementById('edit-usuario-asignado');
+    if (editUsuarioAsignado && perm.puede_asignar === false) editUsuarioAsignado.closest('.detalle-campo')?.style.setProperty('display', 'none');
+    const imprimirPdfBtn = document.getElementById('imprimir-pdf-btn');
+    if (imprimirPdfBtn && perm.puede_imprimir === false) imprimirPdfBtn.style.display = 'none';
+    const waTallerBtn = document.getElementById('whatsapp-taller-btn');
+    if (waTallerBtn && perm.puede_imprimir === false) waTallerBtn.style.display = 'none';
+    else if (waTallerBtn) waTallerBtn.style.display = '';
     
     // Configurar autocompletado para el campo resource
     const resourceInput = document.getElementById('edit-resource');
@@ -1883,8 +2349,9 @@ function mostrarDetalleIncidencia(detalle) {
                     resourceInput.value = elemento.no;
                     const nameDisplay = document.getElementById('resource-name-display');
                     if (nameDisplay) {
-                        nameDisplay.textContent = elemento.name || '';
-                        nameDisplay.style.display = elemento.name ? 'block' : 'none';
+                        const texto = formatearRecursoDisplay({ resource_name: elemento.name, recurso: elemento.no });
+                        nameDisplay.textContent = texto;
+                        nameDisplay.style.display = texto !== '-' ? 'block' : 'none';
                     }
                     autocompleteDiv.style.display = 'none';
                 });
@@ -1940,6 +2407,7 @@ async function guardarCambiosIncidencia() {
     const descripcionInput = document.getElementById('edit-descripcion');
     const fechaHoraInput = document.getElementById('edit-fecha-hora');
     const resourceInput = document.getElementById('edit-resource');
+    const usuarioAsignadoSelect = document.getElementById('edit-usuario-asignado');
     const guardarBtn = document.getElementById('guardar-cambios-btn');
     const mensajeSpan = document.getElementById('guardar-mensaje');
     
@@ -1951,6 +2419,7 @@ async function guardarCambiosIncidencia() {
     const nuevaDescripcion = descripcionInput.value.trim();
     const nuevaFechaHora = fechaHoraInput.value;
     const nuevoRecurso = resourceInput.value.trim();
+    const nuevoUsuarioId = (usuarioAsignadoSelect && usuarioAsignadoSelect.value.trim()) || null;
     
     // Validar que haya cambios
     const descripcionOriginal = detalleActual.description || '';
@@ -1973,10 +2442,12 @@ async function guardarCambiosIncidencia() {
     
     const recursoOriginal = detalleActual.resource || '';
     const hayCambioEstado = estadoPendienteGuardar !== null;
+    const usuarioOriginal = detalleActual.Id_Uduario_Gtask_Asignado || detalleActual.Id_Usuario_Gtask_Asignado || detalleActual.user_assigned || detalleActual.user || '';
+    const hayCambioUsuario = (nuevoUsuarioId || '') !== String(usuarioOriginal);
     
     if (nuevaDescripcion === descripcionOriginalTexto && 
         nuevaFechaHora === fechaOriginalInput && 
-        nuevoRecurso === recursoOriginal && !hayCambioEstado) {
+        nuevoRecurso === recursoOriginal && !hayCambioEstado && !hayCambioUsuario) {
         if (mensajeSpan) {
             mensajeSpan.textContent = 'No hay cambios para guardar';
             mensajeSpan.className = 'guardar-mensaje guardar-mensaje-info';
@@ -2013,6 +2484,9 @@ async function guardarCambiosIncidencia() {
         if (estadoPendienteGuardar) {
             datosActualizacion.state = estadoPendienteGuardar;
         }
+        if (nuevoUsuarioId !== undefined) {
+            datosActualizacion.usuario_id = nuevoUsuarioId;
+        }
         
         const response = await fetch('/api/actualizar-incidencia', {
             method: 'POST',
@@ -2032,6 +2506,10 @@ async function guardarCambiosIncidencia() {
             }
             if (nuevoRecurso) {
                 detalleActual.resource = nuevoRecurso;
+            }
+            if (nuevoUsuarioId !== undefined) {
+                detalleActual.user_assigned = nuevoUsuarioId;
+                detalleActual.Id_Uduario_Gtask_Asignado = nuevoUsuarioId;
             }
             if (estadoPendienteGuardar) {
                 detalleActual.state = estadoPendienteGuardar;
@@ -2145,6 +2623,125 @@ function rotarImagen(url, event) {
                 imagenItem.classList.remove('imagen-item-vertical');
             }
         }
+    }
+}
+
+/** Aviso por WhatsApp a usuarios del departamento Taller (GTask) con teléfono. */
+async function notificarWhatsappTaller() {
+    if (!idGtaskActual) {
+        alert('No hay incidencia seleccionada.');
+        return;
+    }
+    const perm = estado.permisos || {};
+    if (perm.puede_imprimir === false) {
+        alert('No tiene permiso para esta acción.');
+        return;
+    }
+    if (!confirm('¿Enviar aviso por WhatsApp a todo el personal de Taller con teléfono registrado en GTask?')) {
+        return;
+    }
+    const btn = document.getElementById('whatsapp-taller-btn');
+    const prev = btn ? btn.textContent : '';
+    if (btn) {
+        btn.disabled = true;
+        btn.textContent = '⏳ Enviando...';
+    }
+    try {
+        const incLista = (estado.incidencias || []).find(
+            (i) => String(i.id_gtask || '') === String(idGtaskActual)
+        );
+        const payload = { id_gtask: idGtaskActual };
+        if (incLista && incLista.no != null && String(incLista.no).trim() !== '') {
+            payload.no = String(incLista.no).trim();
+        }
+        const response = await fetch('/api/incidencia/notificar-whatsapp-taller', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        const data = await response.json().catch(() => ({}));
+        if (data.success) {
+            let msg = `WhatsApp enviado a ${data.enviados} destinatario(s).`;
+            if (data.en_departamento != null) {
+                msg += `\nUsuarios en Taller: ${data.en_departamento} (con teléfono: ${data.con_telefono ?? '—'}).`;
+            }
+            if (data.omitidos_duplicado_telefono > 0) {
+                msg += `\nOmitidos (mismo número): ${data.omitidos_duplicado_telefono}.`;
+            }
+            if (data.errores && data.errores.length) {
+                msg += `\n\nEnvíos fallidos:\n${data.errores.join('\n')}`;
+            }
+            if (data.bc_notificaciones && data.bc_notificaciones.length) {
+                const bc = data.bc_notificaciones;
+                const nOk = bc.filter(x => x.business_central === 'exito').length;
+                const nOm = bc.filter(x => x.business_central === 'omitido').length;
+                const nErr = bc.filter(x => x.business_central === 'error').length;
+                msg += `\n\nBusiness Central (postRespuestaWhatsApp): ${nOk} correctos, ${nOm} omitidos, ${nErr} con error.`;
+                const det = bc
+                    .filter(x => x.business_central !== 'exito')
+                    .map(x => {
+                        const t = (x.telefono || '').slice(-6);
+                        const d = (x.detalle || '').slice(0, 200);
+                        return `• …${t}: ${x.business_central} — ${d}`;
+                    });
+                if (det.length) msg += '\n' + det.join('\n');
+            }
+            alert(msg);
+        } else {
+            alert(`No se completó el envío: ${data.error || response.statusText || 'Error desconocido'}`);
+        }
+    } catch (e) {
+        alert('Error de red: ' + (e.message || e));
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.textContent = prev;
+        }
+    }
+}
+
+// Antes de imprimir, pasar por actualizar incidencia para sincronizar con BC
+async function imprimirPDFPasandoPorActualizar() {
+    if (!detalleActual || !idGtaskActual) return;
+    const descripcionInput = document.getElementById('edit-descripcion');
+    const fechaHoraInput = document.getElementById('edit-fecha-hora');
+    const resourceInput = document.getElementById('edit-resource');
+    const usuarioAsignadoSelect = document.getElementById('edit-usuario-asignado');
+    const nuevaDescripcion = (descripcionInput && descripcionInput.value.trim()) || detalleActual.description || '';
+    const nuevaFechaHora = (fechaHoraInput && fechaHoraInput.value) || (detalleActual.fecha ? new Date(detalleActual.fecha).toISOString().slice(0, 16) : '');
+    const nuevoRecurso = (resourceInput && resourceInput.value.trim()) || detalleActual.resource || '';
+    const nuevoUsuarioId = (usuarioAsignadoSelect && usuarioAsignadoSelect.value.trim()) || null;
+    const datosActualizacion = {
+        id_gtask: idGtaskActual,
+        descripcion: nuevaDescripcion,
+        fecha_hora: nuevaFechaHora || undefined,
+        recurso: nuevoRecurso
+    };
+    if (estadoPendienteGuardar) {
+        datosActualizacion.state = estadoPendienteGuardar;
+    }
+    if (nuevoUsuarioId !== undefined && nuevoUsuarioId !== null) {
+        datosActualizacion.usuario_id = nuevoUsuarioId;
+    }
+    try {
+        const response = await fetch('/api/actualizar-incidencia', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(datosActualizacion)
+        });
+        const data = await response.json();
+        if (!data.success) {
+            alert('Error al actualizar la incidencia antes de imprimir: ' + (data.error || 'Error desconocido'));
+            return;
+        }
+        // Actualizar detalle en memoria con lo guardado para que el PDF sea consistente
+        detalleActual.description = nuevaDescripcion;
+        if (nuevaFechaHora) detalleActual.fecha = new Date(nuevaFechaHora).toISOString();
+        detalleActual.resource = nuevoRecurso;
+        if (estadoPendienteGuardar) detalleActual.state = estadoPendienteGuardar;
+        await generarPDF(detalleActual, idGtaskActual);
+    } catch (e) {
+        alert('Error al actualizar o imprimir: ' + (e.message || String(e)));
     }
 }
 
@@ -2313,17 +2910,9 @@ async function generarPDF(detalle, idGtask) {
         doc.setFont('helvetica', 'bold');
         doc.text('Elemento:', margin, yPos);
         doc.setFont('helvetica', 'normal');
-        doc.text(detalle.resource || 'N/A', margin + 25, yPos);
+        const elemTexto = formatearRecursoDisplay(detalle);
+        doc.text(elemTexto === '-' ? 'N/A' : elemTexto, margin + 25, yPos);
         yPos += lineHeight;
-        
-        if (detalle.resource_name) {
-            doc.setFont('helvetica', 'italic');
-            doc.setFontSize(10);
-            doc.text(detalle.resource_name, margin + 10, yPos);
-            doc.setFontSize(12);
-            doc.setFont('helvetica', 'normal');
-            yPos += lineHeight;
-        }
         
         // Ubicación (QR) debajo del Elemento
         if (qrMapsDataUrl) {
@@ -2779,8 +3368,7 @@ async function actualizarNombresUsuarios() {
         }
         await cargarUsuarios();
         actualizarListaFiltroUsuarios();
-        generarCalendario();
-        mostrarIncidenciasLibres();
+        actualizarVista();
         btn.textContent = '✓ Listo';
         setTimeout(() => { btn.textContent = textoOriginal; btn.disabled = false; }, 1500);
     } catch (err) {
@@ -2855,8 +3443,7 @@ function actualizarFiltroDesdeCheckboxes() {
     guardarFiltroUsuarios();
     
     // Regenerar calendario
-    generarCalendario();
-    mostrarIncidenciasLibres();
+    actualizarVista();
 }
 
 // Toggle panel de filtro
@@ -2913,9 +3500,20 @@ document.addEventListener('DOMContentLoaded', () => {
     if (imprimirBtn) {
         imprimirBtn.addEventListener('click', () => {
             if (detalleActual && idGtaskActual) {
-                generarPDF(detalleActual, idGtaskActual);
+                imprimirPDFPasandoPorActualizar();
             } else {
                 alert('No hay detalle de incidencia disponible para imprimir');
+            }
+        });
+    }
+
+    const waTallerBtn = document.getElementById('whatsapp-taller-btn');
+    if (waTallerBtn) {
+        waTallerBtn.addEventListener('click', () => {
+            if (detalleActual && idGtaskActual) {
+                notificarWhatsappTaller();
+            } else {
+                alert('No hay detalle de incidencia disponible');
             }
         });
     }
@@ -2934,7 +3532,7 @@ function semanaAnterior() {
     const mes = fecha.getUTCMonth();
     const dia = fecha.getUTCDate();
     estado.fechaInicioSemana = new Date(Date.UTC(año, mes, dia - 7));
-    generarCalendario();
+    actualizarVista();
     // Actualizar mini calendario para mostrar el mes de la semana visible
     actualizarMiniCalendarioDesdeSemana();
 }
@@ -2945,7 +3543,7 @@ function semanaSiguiente() {
     const mes = fecha.getUTCMonth();
     const dia = fecha.getUTCDate();
     estado.fechaInicioSemana = new Date(Date.UTC(año, mes, dia + 7));
-    generarCalendario();
+    actualizarVista();
     // Actualizar mini calendario para mostrar el mes de la semana visible
     actualizarMiniCalendarioDesdeSemana();
 }
@@ -3156,7 +3754,7 @@ function generarMiniCalendario() {
                     lunes.setUTCDate(fechaObj.getUTCDate() - (diaSemana === 0 ? 6 : diaSemana - 1));
                     lunes.setUTCHours(0, 0, 0, 0); // Normalizar a medianoche UTC
                     estado.fechaInicioSemana = lunes;
-                    generarCalendario();
+                    actualizarVista();
                     actualizarMiniCalendarioDesdeSemana(); // Actualizar para mostrar el mes correcto
                 }
             }
@@ -3174,12 +3772,22 @@ function generarMiniCalendario() {
     }
 }
 
+// Obtener lista de tipos de incidencia únicos (misma fuente que el filtro "Mis calendarios")
+function obtenerTiposIncidenciaUnicos() {
+    const tiposUnicos = new Set();
+    (estado.incidencias || []).forEach(inc => {
+        if (inc.tipo_incidencia) {
+            tiposUnicos.add(inc.tipo_incidencia);
+        }
+    });
+    return Array.from(tiposUnicos).sort((a, b) => String(a).localeCompare(String(b), 'es'));
+}
+
 // Generar filtros de tipos de incidencias
 function generarFiltrosTipos() {
     const container = document.getElementById('tipos-incidencias-filtro');
     if (!container) return;
     
-    // Obtener tipos únicos de incidencias
     const tiposUnicos = new Set();
     estado.incidencias.forEach(inc => {
         if (inc.tipo_incidencia) {
@@ -3187,13 +3795,20 @@ function generarFiltrosTipos() {
         }
     });
     
-    if (tiposUnicos.size === 0) {
-        container.innerHTML = '<p style="color: #999; font-size: 0.85rem;">No hay tipos de incidencias</p>';
+    // Si el usuario tiene permisos que limitan tipos visibles, solo mostrar esos
+    const tiposPermitidos = estado.permisos && estado.permisos.tipos_incidencia_visible;
+    let tiposAMostrar = Array.from(tiposUnicos);
+    if (Array.isArray(tiposPermitidos) && tiposPermitidos.length > 0) {
+        tiposAMostrar = tiposAMostrar.filter(t => tiposPermitidos.some(p => String(p).trim() === String(t).trim()));
+    }
+    
+    if (tiposAMostrar.length === 0) {
+        container.innerHTML = '<p style="color: #999; font-size: 0.85rem;">No hay tipos de incidencias visibles</p>';
         return;
     }
     
     let html = '';
-    tiposUnicos.forEach(tipo => {
+    tiposAMostrar.forEach(tipo => {
         const tipoClase = obtenerColorPorTipo(tipo);
         
         // Crear elemento temporal para obtener el color
@@ -3223,7 +3838,7 @@ function generarFiltrosTipos() {
     // Agregar event listeners
     container.querySelectorAll('.filtro-tipo-checkbox').forEach(checkbox => {
         checkbox.addEventListener('change', () => {
-            generarCalendario();
+            actualizarVista();
         });
     });
 }

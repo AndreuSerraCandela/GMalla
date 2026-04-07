@@ -2,10 +2,13 @@
 Aplicación web Flask para GMalla - Gestión de Calendario de Asignación de Incidencias
 """
 import sys
+import logging
 from pathlib import Path
 from flask import Flask, render_template, jsonify, request
 from datetime import date, datetime, timedelta
 import pyodbc
+
+logger = logging.getLogger(__name__)
 
 # Agregar el directorio raíz al path para importaciones
 sys.path.insert(0, str(Path(__file__).parent))
@@ -22,8 +25,11 @@ from config import (
     GTASK_API_URL,
     GTASK_USERNAME,
     GTASK_PASSWORD,
-    LLM_BASE_URL
+    LLM_BASE_URL,
+    ADMINISTRADORES,
+    PERMISOS_FILE,
 )
+from apiwhats_client import notificar_whatsapp_asignacion_incidencia
 
 app = Flask(__name__)
 
@@ -58,6 +64,85 @@ asignador_automatico = AsignadorAutomatico(
     llm_client=llm_client,
     gestor=gestor
 )
+
+# --- Permisos (permisos.json + administradores en .env) ---
+import json
+
+def _permisos_default():
+    """Permisos por defecto: todo permitido."""
+    return {
+        "tipos_incidencia_visible": None,  # None = todos los tipos visibles
+        "comunicado_por_emt_visible": True,
+        "puede_modificar": True,
+        "puede_asignar": True,
+        "puede_imprimir": True,
+    }
+
+def _load_permisos():
+    """Carga permisos.json. Si no existe o está vacío, devuelve {}."""
+    try:
+        if PERMISOS_FILE.exists():
+            with open(PERMISOS_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                return data if isinstance(data, dict) else {}
+    except Exception:
+        pass
+    return {}
+
+def _save_permisos(data):
+    """Guarda permisos.json."""
+    with open(PERMISOS_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
+
+def _user_identifier(user_data):
+    """Identificador único del usuario (id o username en minúscula)."""
+    if not user_data:
+        return None
+    uid = user_data.get("id") or user_data.get("_id") or user_data.get("user_id")
+    if uid:
+        return str(uid)
+    uname = user_data.get("username") or user_data.get("email") or user_data.get("nombre") or user_data.get("name")
+    if uname:
+        return str(uname).strip().lower()
+    return None
+
+def is_admin(user_data):
+    """True si el usuario está en ADMINISTRADORES (por username/email)."""
+    if not user_data or not ADMINISTRADORES:
+        return False
+    # Probar todas las claves habituales (API puede devolver camelCase, etc.)
+    raw = (
+        user_data.get("username") or user_data.get("userName") or user_data.get("Username")
+        or user_data.get("user")  # Algunas APIs devuelven "user" como string
+        or user_data.get("email") or user_data.get("Email")
+        or user_data.get("name") or user_data.get("nombre") or user_data.get("Name")
+    )
+    if not raw:
+        return False
+    s = str(raw).strip().lower()
+    if s in ADMINISTRADORES:
+        return True
+    # Si es un email (usuario@dominio), comparar también la parte local
+    if "@" in s:
+        local = s.split("@")[0].strip()
+        if local in ADMINISTRADORES:
+            return True
+    return False
+
+def get_permisos_for_user(user_id_or_username):
+    """Devuelve el dict de permisos para un usuario (merge con defaults)."""
+    defaults = _permisos_default()
+    if not user_id_or_username:
+        return defaults
+    key = str(user_id_or_username).strip().lower() if isinstance(user_id_or_username, str) else str(user_id_or_username)
+    data = _load_permisos()
+    user_perm = data.get(key) or data.get(user_id_or_username)
+    if not user_perm or not isinstance(user_perm, dict):
+        return defaults
+    for k, v in defaults.items():
+        if k not in user_perm:
+            user_perm[k] = v
+    return user_perm
 
 
 @app.route('/')
@@ -135,6 +220,117 @@ def auth_status():
         }), 500
 
 
+# --- Rutas de permisos ---
+@app.route('/api/permisos', methods=['GET'])
+def api_permisos():
+    """Devuelve los permisos del usuario actual y si es admin."""
+    try:
+        user_data = gtask_client.obtener_usuario_actual()
+        admin = is_admin(user_data)
+        user_id = _user_identifier(user_data)
+        permisos = get_permisos_for_user(user_id)
+        return jsonify({
+            'success': True,
+            'permisos': permisos,
+            'is_admin': admin,
+            'user_identifier': user_id,
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/permisos/admin/usuarios', methods=['GET'])
+def api_permisos_admin_usuarios():
+    """Lista de usuarios (desde GTask /users). Solo administradores."""
+    try:
+        user_data = gtask_client.obtener_usuario_actual()
+        if not is_admin(user_data):
+            return jsonify({'success': False, 'error': 'No autorizado. Solo administradores.'}), 403
+        resultado = gtask_client.obtener_usuarios(usar_cache=False)
+        if not resultado.get('success'):
+            return jsonify({'success': False, 'error': resultado.get('error', 'Error al obtener usuarios')}), 500
+        usuarios = resultado.get('users', [])
+        return jsonify({'success': True, 'usuarios': usuarios})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/permisos/admin', methods=['GET'])
+def api_permisos_admin_get():
+    """Obtiene el contenido completo de permisos.json. Solo administradores."""
+    try:
+        user_data = gtask_client.obtener_usuario_actual()
+        if not is_admin(user_data):
+            return jsonify({'success': False, 'error': 'No autorizado. Solo administradores.'}), 403
+        data = _load_permisos()
+        return jsonify({'success': True, 'permisos': data})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/permisos/admin', methods=['POST'])
+def api_permisos_admin_save():
+    """Guarda permisos.json. Solo administradores."""
+    try:
+        user_data = gtask_client.obtener_usuario_actual()
+        if not is_admin(user_data):
+            return jsonify({'success': False, 'error': 'No autorizado. Solo administradores.'}), 403
+        data = request.get_json()
+        if not isinstance(data, dict):
+            return jsonify({'success': False, 'error': 'Se esperaba un objeto JSON'}), 400
+        _save_permisos(data)
+        return jsonify({'success': True, 'message': 'Permisos guardados correctamente'})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+def _obtener_nombres_recursos(codes):
+    """Obtiene nombres de recursos/paradas desde ElementosMallorca para una lista de códigos. Devuelve dict code -> name."""
+    if not codes:
+        return {}
+    codes = list(set(c for c in codes if c))
+    if not codes:
+        return {}
+    try:
+        server, database, username, password = '192.168.10.190', 'Malla2009', 'SA', 'SA1234sa'
+        drivers_odbc = ['ODBC Driver 17 for SQL Server', 'ODBC Driver 18 for SQL Server', 'ODBC Driver 13 for SQL Server', 'SQL Server']
+        conn = None
+        for driver in drivers_odbc:
+            try:
+                cs = f'DRIVER={{{driver}}};SERVER={server};DATABASE={database};UID={username};PWD={password};'
+                if '17' in driver or '18' in driver:
+                    cs += 'TrustServerCertificate=yes;'
+                conn = pyodbc.connect(cs)
+                break
+            except Exception:
+                continue
+        if not conn:
+            return {}
+        result = {}
+        try:
+            cursor = conn.cursor()
+            placeholders = ','.join('?' * len(codes))
+            cursor.execute(f"SELECT [No_], [Name] FROM [dbo].[ElementosMallorca] WHERE [No_] IN ({placeholders})", codes)
+            for row in cursor:
+                result[str(row[0] or '').strip()] = (row[1] or '').strip()
+            cursor.close()
+        finally:
+            conn.close()
+        return result
+    except Exception as e:
+        print(f"[WARN] No se pudieron obtener nombres de recursos: {e}")
+        return {}
+
+
+def _a_iso_fecha_o_datetime(val):
+    """Serializa date/datetime a ISO; BC a veces deja ya un str."""
+    if val is None:
+        return None
+    if hasattr(val, 'isoformat'):
+        return val.isoformat()
+    return str(val)
+
+
 @app.route('/api/incidencias', methods=['GET'])
 def obtener_incidencias():
     """API para obtener todas las incidencias"""
@@ -153,18 +349,27 @@ def obtener_incidencias():
         
         incidencias = bc_client.obtener_incidencias(filtros=filtros)
         
+        # Resolver nombres de recursos desde ElementosMallorca
+        codigos_recurso = [inc.recurso for inc in incidencias if inc.recurso]
+        nombres_recursos = _obtener_nombres_recursos(codigos_recurso)
+        
         # Convertir incidencias a formato JSON
         incidencias_json = []
         for inc in incidencias:
+            recurso_code = inc.recurso or ''
+            resource_name = nombres_recursos.get(recurso_code.strip(), recurso_code) if recurso_code else ''
             incidencias_json.append({
                 'no': inc.no,
                 'descripcion': inc.descripcion,
-                'fecha': inc.fecha.isoformat() if inc.fecha else None,
+                'fecha': _a_iso_fecha_o_datetime(inc.fecha),
                 'estado': inc.estado.value,
                 'recurso': inc.recurso,
+                'resource_name': resource_name or inc.recurso,
                 'tipo_incidencia': inc.tipo_incidencia,
                 'usuario': inc.usuario,
-                'fecha_hora': inc.fecha_hora.isoformat() if inc.fecha_hora else None,
+                'usuario_creador': getattr(inc, 'usuario_creador', None),
+                'comunicado_por_emt': getattr(inc, 'comunicado_por_emt', None),
+                'fecha_hora': _a_iso_fecha_o_datetime(inc.fecha_hora),
                 'id_gtask': inc.id_gtask,
                 'url_primera_imagen': inc.url_primera_imagen
             })
@@ -181,35 +386,67 @@ def obtener_incidencias():
         }), 500
 
 
+def _json_safe_valor(val):
+    """Convierte estructuras de GTask/Mongo a tipos serializables en JSON (evita 500 en jsonify)."""
+    from datetime import date, datetime
+
+    if val is None or isinstance(val, (bool, int, float, str)):
+        return val
+    if isinstance(val, dict):
+        return {str(k): _json_safe_valor(v) for k, v in val.items()}
+    if isinstance(val, (list, tuple)):
+        return [_json_safe_valor(x) for x in val]
+    if isinstance(val, (datetime, date)):
+        return val.isoformat()
+    return str(val)
+
+
 @app.route('/api/usuarios', methods=['GET'])
 def obtener_usuarios():
-    """API para obtener lista de usuarios (ordenados por nombre)"""
+    """API para obtener lista de usuarios desde GTask (ordenados por nombre)."""
     try:
         resultado = gtask_client.obtener_usuarios()
-        
-        if resultado['success']:
-            # Asegurar que estén ordenados por nombre (por si acaso)
-            usuarios = resultado['users']
-            def obtener_nombre_usuario(user):
-                """Obtiene el nombre del usuario para ordenación"""
-                return (user.get('name') or user.get('username') or user.get('nombre') or '').lower()
-            
-            usuarios_ordenados = sorted(usuarios, key=obtener_nombre_usuario)
-            
-            return jsonify({
-                'success': True,
-                'usuarios': usuarios_ordenados,
-                'count': len(usuarios_ordenados)
-            })
-        else:
+        if not resultado.get('success'):
+            err = resultado.get('error', 'Error desconocido')
+            extra = resultado.get('response_text')
+            suf = ''
+            if extra:
+                s = str(extra)
+                suf = f" | respuesta: {s[:500]}..." if len(s) > 500 else f" | respuesta: {s}"
+            logger.error("[GTask] Fallo al obtener usuarios: %s%s", err, suf)
+            # 502 = fallo del servicio GTask; cuerpo JSON para que el front pueda mostrar el motivo
             return jsonify({
                 'success': False,
-                'error': resultado.get('error', 'Error desconocido')
-            }), 500
+                'error': err,
+                'usuarios': [],
+                'count': 0,
+            }), 502
+
+        usuarios = resultado.get('users') or []
+        if not isinstance(usuarios, list):
+            usuarios = []
+        usuarios = [u for u in usuarios if isinstance(u, dict)]
+
+        def obtener_nombre_usuario(user):
+            return (
+                user.get('name') or user.get('username') or user.get('nombre') or ''
+            ).lower()
+
+        usuarios_ordenados = sorted(usuarios, key=obtener_nombre_usuario)
+        usuarios_json = [_json_safe_valor(u) for u in usuarios_ordenados]
+
+        return jsonify({
+            'success': True,
+            'usuarios': usuarios_json,
+            'count': len(usuarios_json)
+        })
     except Exception as e:
+        logger.exception("[GTask] Excepción en /api/usuarios: %s", e)
         return jsonify({
             'success': False,
-            'error': str(e)
+            'error': str(e),
+            'usuarios': [],
+            'count': 0,
         }), 500
 
 
@@ -299,6 +536,8 @@ def mover_incidencia():
                     'error': f'Incidencia {no_incidencia} no encontrada'
                 }), 404
         
+        usuario_anterior = incidencia.usuario
+        
         # Preparar parámetros para mover
         nueva_fecha = None
         if nueva_fecha_str:
@@ -332,6 +571,11 @@ def mover_incidencia():
         )
         
         if exito:
+            if nuevo_usuario_id is not None:
+                nuevo = str(nuevo_usuario_id).strip()
+                prev = (str(usuario_anterior).strip() if usuario_anterior else "") or ""
+                if nuevo and nuevo != prev:
+                    notificar_whatsapp_asignacion_incidencia(gtask_client, nuevo, incidencia, bc_client)
             return jsonify({
                 'success': True,
                 'message': f'Incidencia {no_incidencia} movida correctamente'
@@ -456,6 +700,7 @@ def actualizar_incidencia():
         nueva_fecha_hora = data.get('fecha_hora')
         nuevo_recurso = data.get('recurso')
         nuevo_estado = data.get('state') or data.get('estado')
+        nuevo_usuario_id = data.get('usuario_id')  # Usuario asignado (None o '' = sin asignar)
         
         if not id_gtask:
             return jsonify({
@@ -474,6 +719,8 @@ def actualizar_incidencia():
                 'success': False,
                 'error': f'Incidencia con ID {id_gtask} no encontrada'
             }), 404
+        
+        usuario_previo = incidencia.usuario
         
         # Actualizar descripción si se proporciona
         if nueva_descripcion is not None:
@@ -506,10 +753,19 @@ def actualizar_incidencia():
                 normalizado = 'EnProgreso' if estado_str == 'En Progreso' else estado_str
                 incidencia.estado = EstadoIncidencia(normalizado)
         
+        # Actualizar usuario asignado si se proporciona (desde el modal de edición)
+        if nuevo_usuario_id is not None:
+            incidencia.usuario = (nuevo_usuario_id and str(nuevo_usuario_id).strip()) or None
+        
         # Actualizar en Business Central
-        exito = bc_client.actualizar_incidencia(incidencia)
+        exito, error_msg = bc_client.actualizar_incidencia(incidencia)
         
         if exito:
+            if nuevo_usuario_id is not None:
+                nuevo = (nuevo_usuario_id and str(nuevo_usuario_id).strip()) or None
+                prev = (str(usuario_previo).strip() if usuario_previo else None) or None
+                if nuevo and nuevo != prev:
+                    notificar_whatsapp_asignacion_incidencia(gtask_client, nuevo, incidencia, bc_client)
             return jsonify({
                 'success': True,
                 'message': f'Incidencia {incidencia.no} actualizada correctamente'
@@ -517,7 +773,7 @@ def actualizar_incidencia():
         else:
             return jsonify({
                 'success': False,
-                'error': 'No se pudo actualizar la incidencia en Business Central'
+                'error': error_msg or 'No se pudo actualizar la incidencia en Business Central'
             }), 500
             
     except Exception as e:
@@ -556,14 +812,25 @@ def asignar_incidencia():
                     'error': f'Incidencia {no_incidencia} no encontrada'
                 }), 404
         
+        usuario_anterior = incidencia.usuario
+        
         # Asignar la incidencia
         exito = gestor.asignar_incidencia(incidencia, usuario_id)
         
         if exito:
             # Sincronizar con BC
             if bc_client:
-                bc_client.actualizar_incidencia(incidencia)
+                exito_bc, error_bc = bc_client.actualizar_incidencia(incidencia)
+                if not exito_bc:
+                    return jsonify({
+                        'success': False,
+                        'error': error_bc or 'No se pudo sincronizar la asignación con Business Central'
+                    }), 500
             
+            uid = str(usuario_id).strip()
+            prev = (str(usuario_anterior).strip() if usuario_anterior else None) or None
+            if uid and uid != prev:
+                notificar_whatsapp_asignacion_incidencia(gtask_client, uid, incidencia, bc_client)
             return jsonify({
                 'success': True,
                 'message': f'Incidencia {no_incidencia} asignada correctamente'
@@ -579,6 +846,41 @@ def asignar_incidencia():
             'success': False,
             'error': str(e)
         }), 500
+
+
+@app.route('/api/diagnostico/whatsapp-bc', methods=['GET'])
+def diagnostico_whatsapp_bc():
+    """
+    Solo lectura: comprueba si están configurados Apiwhats, notificación a BC y URL OData postRespuestaWhatsApp.
+    Abre en el navegador /api/diagnostico/whatsapp-bc para depurar por qué no llegan registros a BC.
+    """
+    try:
+        from config import (
+            API_WHATS_URL,
+            WHATSAPP_NOTIFICAR_BC,
+            WHATSAPP_NOTIFICAR_ASIGNACION,
+            get_bc_post_respuesta_whatsapp_url,
+            BC_CONFIG,
+        )
+
+        return jsonify(
+            {
+                "success": True,
+                "api_whatsapp_url_configurada": bool((API_WHATS_URL or "").strip()),
+                "notificar_whatsapp_habilitado": WHATSAPP_NOTIFICAR_ASIGNACION,
+                "notificar_business_central_tras_whatsapp": WHATSAPP_NOTIFICAR_BC,
+                "bc_url_post_respuesta_whatsapp": get_bc_post_respuesta_whatsapp_url(),
+                "bc_empresa_company_param": BC_CONFIG.get("company"),
+                "bc_autenticacion": (
+                    "bearer_api_key"
+                    if (BUSINESS_CENTRAL_API_KEY or "").strip()
+                    else "basic_usuario_password"
+                ),
+            }
+        )
+    except Exception as e:
+        logger.exception("diagnostico whatsapp-bc")
+        return jsonify({"success": False, "error": str(e)}), 500
 
 
 @app.route('/api/detalle-incidencia/<id_gtask>', methods=['GET'])
@@ -604,6 +906,46 @@ def obtener_detalle_incidencia(id_gtask):
             'success': False,
             'error': str(e)
         }), 500
+
+
+@app.route('/api/incidencia/notificar-whatsapp-taller', methods=['POST'])
+def incidencia_notificar_whatsapp_taller():
+    """
+    Envía por WhatsApp el aviso de la incidencia a todos los usuarios GTask del departamento Taller
+    que tengan teléfono (campo phone). Misma integración BC que otros envíos (postRespuestaWhatsApp).
+    """
+    try:
+        data = request.get_json() or {}
+        id_gtask = data.get("id_gtask") or data.get("id")
+        if not id_gtask:
+            return jsonify({"success": False, "error": "Falta id_gtask"}), 400
+        id_gtask = str(id_gtask).strip()
+        detalle = bc_client.obtener_detalle_incidencia(id_gtask)
+        if not detalle:
+            return jsonify(
+                {
+                    "success": False,
+                    "error": "No se pudo obtener el detalle de la incidencia en Business Central",
+                }
+            ), 404
+        no_cliente = data.get("no")
+        if no_cliente is not None and str(no_cliente).strip():
+            detalle = dict(detalle)
+            detalle["No"] = str(no_cliente).strip()
+        from apiwhats_client import (
+            enriquecer_detalle_con_no_lista_bc,
+            notificar_whatsapp_taller_incidencia,
+        )
+
+        detalle = enriquecer_detalle_con_no_lista_bc(bc_client, id_gtask, detalle)
+        resultado = notificar_whatsapp_taller_incidencia(
+            gtask_client, bc_client, id_gtask, detalle
+        )
+        code = 200 if resultado.get("success") else 422
+        return jsonify(resultado), code
+    except Exception as e:
+        logger.exception("notificar-whatsapp-taller: %s", e)
+        return jsonify({"success": False, "error": str(e)}), 500
 
 
 @app.route('/api/asignacion-automatica', methods=['POST'])

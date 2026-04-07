@@ -55,6 +55,8 @@
                 <h1>GMalla - Calendario de Incidencias</h1>
             </div>
             <div class="auth-section">
+                <button type="button" id="navbar-permisos-btn" class="navbar-panel-btn" title="Asignar permisos" aria-label="Permisos" style="display: none;"><i class="fa fa-lock"></i></button>
+                <button type="button" id="navbar-panel-btn" class="navbar-panel-btn" title="Abrir panel" aria-label="Abrir panel"><i class="fa fa-bars"></i></button>
                 <div id="user-icon" class="user-icon" style="display: none;" title="">
                     <i class="fa fa-user"></i>
                 </div>
@@ -64,51 +66,15 @@
             </div>
         </div>
     </nav>
-    <!-- Modal de Detalle de Incidencia -->
-    <div id="detalle-modal" class="modal">
-        <div class="modal-content modal-detalle">
-            <span class="close" id="close-detalle">&times;</span>
-            <div class="modal-header-detalle">
-                <h2>📋 Detalle de Incidencia</h2>
-                <button id="imprimir-pdf-btn" class="btn-imprimir-pdf">🖨️ Imprimir PDF</button>
-            </div>
-            <div id="detalle-contenido">
-                <div class="loading">Cargando detalle...</div>
-            </div>
-        </div>
-    </div>
 
-    <!-- Modal de Login -->
-    <div id="login-modal" class="modal">
-        <div class="modal-content">
-            <span class="close">&times;</span>
-            <h2>🔐 Iniciar Sesión - GTask</h2>
-            <form id="login-form">
-                <div class="form-group">
-                    <label for="username">Usuario:</label>
-                    <input type="text" id="username" name="username" required>
-                </div>
-                <div class="form-group">
-                    <label for="password">Contraseña:</label>
-                    <input type="password" id="password" name="password" required>
-                </div>
-                <button type="submit" class="btn-login">Iniciar Sesión</button>
-                <div id="login-error" class="error-message"></div>
-            </form>
+    <!-- Panel lateral (arriba a la derecha, junto al usuario) -->
+    <div id="sidebar-panel" class="sidebar-panel">
+        <div class="sidebar-panel-header">
+            <span>Opciones</span>
+            <button type="button" id="sidebar-panel-cerrar" class="sidebar-panel-cerrar" title="Cerrar panel">&times;</button>
         </div>
-    </div>
-
-    <!-- Overlay de carga -->
-    <div id="loading-overlay" class="loading-overlay">
-        <div class="loading-overlay-content">
-            <h3>Creando Tarea...</h3>
-            <div class="loading-spinner"></div>
-        </div>
-    </div>
-
-    <div class="content-wrapper">
-        <!-- Sidebar izquierdo -->
-        <aside class="sidebar-left">
+        <div class="sidebar-panel-content">
+        <aside class="sidebar-left" id="sidebar-left">
             <div class="sidebar-section">
                 <h3>Calendario</h3>
                 <div id="mini-calendario" class="mini-calendario">
@@ -124,23 +90,103 @@
                 </div>
             </div>
             <div class="sidebar-section">
+                <h3>Comunicado por EMT</h3>
+                <div id="filtro-comunicado-emt-container" class="filtro-estado">
+                    <label class="filtro-estado-item"><input type="checkbox" name="filtro-comunicado-emt" value="sí" id="filtro-comunicado-emt-si"> Sí</label>
+                    <label class="filtro-estado-item"><input type="checkbox" name="filtro-comunicado-emt" value="no" id="filtro-comunicado-emt-no"> No</label>
+                </div>
+            </div>
+            <div class="sidebar-section">
                 <h3>Mis calendarios</h3>
                 <div id="tipos-incidencias-filtro" class="tipos-filtro">
                     <!-- Se generará dinámicamente según tipos de incidencias -->
                 </div>
             </div>
             <div class="sidebar-section">
+                <h3>Vista</h3>
+                <div class="vista-selector">
+                    <select id="vista-tipo-select" class="vista-tipo-select" title="Tipo de vista">
+                        <option value="lista">📋 Lista</option>
+                        <option value="simple">📅 Simple</option>
+                        <option value="calendario">🗓️ Calendario</option>
+                    </select>
+                </div>
+            </div>
+            <div class="sidebar-section">
                 <div class="sidebar-buttons">
                     <button id="refrescar-btn" class="btn-sidebar">🔄 Refrescar</button>
-                    <button id="vista-simple-btn" class="btn-sidebar btn-vista-simple" title="Cambiar a vista simple">📋 Vista Simple</button>
                     <button id="filtro-usuarios-btn" class="btn-sidebar btn-filtro">🔍 Filtrar Usuarios</button>
                     <button id="asignar-automatico-btn" class="btn-sidebar btn-asignar-auto">🤖 Asignar Automáticamente</button>
                     <button id="reasignar-automatico-btn" class="btn-sidebar btn-reasignar-auto">🔄 Reasignar Automáticamente</button>
                 </div>
             </div>
         </aside>
-        
-        <!-- Contenido principal -->
+        </div>
+    </div>
+    <!-- Modal de Detalle de Incidencia -->
+    <div id="detalle-modal" class="modal">
+        <div class="modal-content modal-detalle">
+            <span class="close" id="close-detalle">&times;</span>
+            <div class="modal-header-detalle">
+                <h2>📋 Detalle de Incidencia</h2>
+                <div class="modal-detalle-botones-header">
+                    <button type="button" id="imprimir-pdf-btn" class="btn-imprimir-pdf">🖨️ Imprimir PDF</button>
+                    <button type="button" id="whatsapp-taller-btn" class="btn-whatsapp-taller" title="Enviar aviso por WhatsApp a todo el personal de Taller con teléfono en GTask">📱 Avisar Taller (WhatsApp)</button>
+                </div>
+            </div>
+            <div id="detalle-contenido">
+                <div class="loading">Cargando detalle...</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal de Login -->
+    <div id="login-modal" class="modal">
+        <div class="modal-content">
+            <span class="close">&times;</span>
+            <h2>🔐 Iniciar Sesión - GTask</h2>
+            <form id="login-form">
+                <div class="form-group">
+                    <label for="username">Usuario:</label>
+                    <input type="text" id="username" name="username" autocomplete="username" required>
+                </div>
+                <div class="form-group">
+                    <label for="password">Contraseña:</label>
+                    <input type="password" id="password" name="password" autocomplete="current-password" required>
+                </div>
+                <button type="submit" class="btn-login">Iniciar Sesión</button>
+                <div id="login-error" class="error-message"></div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Modal de Permisos (solo administradores) -->
+    <div id="permisos-modal" class="modal" style="display: none;">
+        <div class="modal-content modal-permisos">
+            <span class="close" id="permisos-modal-close">&times;</span>
+            <h2>🔐 Asignar permisos</h2>
+            <p class="permisos-desc">Selecciona los permisos por usuario. Los cambios se guardan en <code>permisos.json</code>.</p>
+            <div id="permisos-loading" class="loading">Cargando usuarios...</div>
+            <div id="permisos-content" style="display: none;">
+                <div id="permisos-lista-usuarios"></div>
+                <div class="permisos-acciones">
+                    <button type="button" id="permisos-guardar-btn" class="btn-guardar">💾 Guardar permisos</button>
+                    <span id="permisos-mensaje" class="guardar-mensaje"></span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Overlay de carga -->
+    <div id="loading-overlay" class="loading-overlay">
+        <div class="loading-overlay-content">
+            <h3>Creando Tarea...</h3>
+            <div class="loading-spinner"></div>
+        </div>
+    </div>
+
+    <div class="content-wrapper">
+        <!-- Contenido principal (panel lateral arriba a la derecha) -->
         <div class="main-container">
             <div class="controls">
                 <button id="semana-anterior-btn" class="btn-nav-semana" title="Semana anterior">◀</button>
@@ -166,6 +212,39 @@
             </div>
         </header>
 
+        <!-- Vista Lista (principal): tabla de todas las tareas -->
+        <div id="vista-lista-container" class="vista-lista-container">
+            <div class="vista-lista-toolbar">
+                <h2 id="vista-lista-titulo">Todas las tareas</h2>
+                <div class="vista-lista-filtro">
+                    <label for="vista-lista-input-filtro">Buscar:</label>
+                    <input type="text" id="vista-lista-input-filtro" class="vista-lista-input-filtro" placeholder="Filtrar por Nº, descripción, tipo, Comunicado por EMT, recurso, usuario..." autocomplete="off">
+                </div>
+            </div>
+            <div class="vista-lista-table-wrapper">
+                <table class="vista-lista-tabla" id="vista-lista-tabla">
+                    <thead>
+                        <tr>
+                            <th scope="col" class="vista-lista-th sortable" data-sort="no">Nº <span class="sort-icon"></span></th>
+                            <th scope="col" class="sortable" data-sort="fecha">Fecha <span class="sort-icon"></span></th>
+                            <th scope="col" class="sortable" data-sort="descripcion">Descripción <span class="sort-icon"></span></th>
+                            <th scope="col" class="sortable" data-sort="tipo">Tipo incidencia <span class="sort-icon"></span></th>
+                            <th scope="col" class="sortable" data-sort="comunicado_emt">Comunicado por EMT <span class="sort-icon"></span></th>
+                            <th scope="col" class="sortable" data-sort="recurso">Recurso / Parada <span class="sort-icon"></span></th>
+                            <th scope="col" class="sortable" data-sort="usuario_creador">Creado por <span class="sort-icon"></span></th>
+                            <th scope="col" class="sortable" data-sort="usuario">Usuario asignado <span class="sort-icon"></span></th>
+                            <th scope="col" class="col-acciones">Acciones</th>
+                        </tr>
+                    </thead>
+                    <tbody id="vista-lista-body">
+                        <!-- Filas generadas dinámicamente -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Vista Calendario (y Simple): oculta cuando vista = Lista -->
+        <div id="vista-calendario-wrapper" class="vista-calendario-wrapper">
         <div class="calendario-container">
             <div class="calendario-tabla-wrapper">
                 <table class="calendario-tabla" id="calendario-tabla">
@@ -185,6 +264,7 @@
         <div class="incidencias-libres" id="incidencias-libres">
             <h3>📋 Incidencias sin asignar</h3>
             <div id="lista-incidencias-libres"></div>
+        </div>
         </div>
         </div>
     </div>
