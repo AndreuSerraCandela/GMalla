@@ -2,28 +2,44 @@
 Cliente para notificaciones WhatsApp vía API Apiwhats (POST /enviar).
 Tras respuesta OK, notifica a Business Central (postRespuestaWhatsApp) con id_mensaje,
 telefono, texto e id_incidencia: el mismo valor que la columna «Nº» del listado (OData No / inc.no).
-También se envía a Apiwhats en el POST /enviar como IdIncidencia (trazabilidad).
+También se envía a Apiwhats en el POST /enviar como IdIncidencia e IdentificadorRegistro (trazabilidad / RecordId).
 """
 from __future__ import annotations
 
 import logging
 import re
+import time
 from typing import Any, Dict, List, Optional
+from urllib.parse import quote
 
 import requests
 
 from config import (
     API_WHATS_SECRET_TOKEN,
     API_WHATS_URL,
+    GMALLA_PUBLIC_APP_URL,
     GTASK_DEPARTAMENTO_TALLER_ID,
     WHATSAPP_NOTIFICAR_ASIGNACION,
     WHATSAPP_NOTIFICAR_BC,
+    WHATSAPP_TALLER_INTERVALO_SEG,
+    WHATSAPP_TALLER_VARIAR_TEXTO,
 )
+# Nº tabla Business Central «Incidencias» (debe coincidir con Apiwhats / BC).
+ID_TABLA_INCIDENCIAS_BC = 7001250#
 
 from gtask.departamento import usuario_en_departamento
 
 _MAX_TEXTO_BC = 8000
 _log = logging.getLogger(__name__)
+
+# Encabezados equivalentes (rotan por destinatario) para que el cuerpo no sea idéntico byte a byte
+_TALLER_LINEAS_ENCABEZADO = (
+    "📋 GMalla — Aviso Taller",
+    "📌 Aviso taller — GMalla",
+    "GMalla | Aviso para Taller",
+    "🔧 Taller: aviso de incidencia (GMalla)",
+    "📣 Incidencia — aviso a Taller (GMalla)",
+)
 
 
 def _log_bc(msg: str) -> None:
@@ -75,12 +91,17 @@ def obtener_telefono_usuario(usuario: Optional[Dict[str, Any]]) -> Optional[str]
     return None
 
 
-def _nombre_usuario(usuario: Optional[Dict[str, Any]]) -> str:
-    if not usuario:
+def obtener_nombre_operario_gtask(usuario: Optional[Dict[str, Any]]) -> str:
+    """
+    GTask JSON: solo claves `name` y `suranme` (apellidos). Con ambos: «name - suranme».
+    """
+    if not usuario or not isinstance(usuario, dict):
         return "equipo"
-    return (
-        (usuario.get("name") or usuario.get("username") or usuario.get("nombre") or "equipo") or "equipo"
-    ).strip() or "equipo"
+    name = str(usuario.get("name") or "").strip()
+    suranme = str(usuario.get("suranme") or "").strip()
+    if suranme:
+        return f"{name} - {suranme}".strip(" -") if name else suranme
+    return name or "equipo"
 
 
 def wamid_desde_respuesta_apiwhats(data: Dict[str, Any]) -> Optional[str]:
@@ -122,7 +143,8 @@ def _notificar_bc_tras_envio(
     id_mensaje: str,
     telefono: str,
     texto: str,
-    id_incidencia: str,
+    id_registro: str,
+    id_tabla: int = ID_TABLA_INCIDENCIAS_BC,
 ) -> Dict[str, Any]:
     """
     Notifica a BC postRespuestaWhatsApp. Devuelve dict para API/diagnóstico:
@@ -130,11 +152,12 @@ def _notificar_bc_tras_envio(
     detalle: texto explicativo (motivo omisión o error HTTP/BC)
     """
     tel = (telefono or "").strip()
-    id_inc = (id_incidencia or "").strip()
+    id_reg = (id_registro or "").strip()
     id_m = (id_mensaje or "").strip()
     base: Dict[str, Any] = {
         "telefono": tel,
-        "id_incidencia": id_inc,
+        "id_registro": id_reg,
+        "id_tabla": id_tabla,
         "tiene_wamid": bool(id_m),
         "business_central": "omitido",
         "detalle": None,
@@ -152,9 +175,9 @@ def _notificar_bc_tras_envio(
             "Sin id_mensaje (wamid): Apiwhats respondió OK pero meta.messages[0].id no viene; "
             "BC exige id_mensaje. Revisa versión de Apiwhats y la respuesta JSON de /enviar."
         )
-        _log_bc(f"Omitido Nº incidencia={id_inc or '—'}: {base['detalle']}")
+        _log_bc(f"Omitido id_registro={id_reg or '—'}: {base['detalle']}")
         return base
-    if not id_inc:
+    if not id_reg:
         base["detalle"] = "Sin número de incidencia (No.); configure el No. en la incidencia"
         _log_bc(f"Omitido (hay wamid pero sin No.): tel={tel[:6]}…")
         return base
@@ -163,27 +186,28 @@ def _notificar_bc_tras_envio(
         "id_mensaje": id_m,
         "telefono": tel,
         "texto": texto_bc,
-        "id_incidencia": id_inc,
+        "id_registro": id_reg,
+        "id_tabla": id_tabla,
     }
     try:
         ok, err = bc_client.notificar_respuesta_whatsapp(inner)
         if ok:
             base["business_central"] = "exito"
             base["detalle"] = "postRespuestaWhatsApp OK"
-            _log_bc(f"OK Nº={id_inc} wamid={id_m[:24]}… tel={tel[:8]}…")
+            _log_bc(f"OK id_registro={id_reg} wamid={id_m[:24]}… tel={tel[:8]}…")
         else:
             base["business_central"] = "error"
             base["detalle"] = (err or "error")[:2000]
             _log.warning(
-                "[GMalla→BC WhatsApp] ERROR Nº=%s: %s",
-                id_inc,
+                "[GMalla→BC WhatsApp] ERROR id_registro=%s: %s",
+                id_reg,
                 base["detalle"][:500],
             )
-            print(f"[GMalla→BC WhatsApp] ERROR Nº={id_inc}: {base['detalle'][:800]}")
+            print(f"[GMalla→BC WhatsApp] ERROR id_registro={id_reg}: {base['detalle'][:800]}")
     except Exception as e:
         base["business_central"] = "error"
         base["detalle"] = str(e)
-        _log.exception("[GMalla→BC WhatsApp] excepción Nº=%s", id_inc)
+        _log.exception("[GMalla→BC WhatsApp] excepción id_registro=%s", id_reg)
         print(f"[GMalla→BC WhatsApp] EXCEPCIÓN: {e}")
     return base
 
@@ -193,7 +217,9 @@ def _enviar_payload(
     mensaje: str,
     *,
     usuario_emisor: str = "asignacion",
-    id_incidencia_no: Optional[str] = None,
+    id_registro_no: Optional[str] = None,
+    id_tabla: Optional[int] = None,
+    nombre_operario: Optional[str] = None,
 ) -> Optional[Dict[str, Any]]:
     base = (API_WHATS_URL or "").strip().rstrip("/")
     url = f"{base}/enviar"
@@ -210,9 +236,13 @@ def _enviar_payload(
         "TelefonoDestino": telefono,
         "Mensaje": mensaje,
     }
-    no_inc = (id_incidencia_no or "").strip()
-    if no_inc:
-        body["IdIncidencia"] = no_inc
+    no_reg = (id_registro_no or "").strip()
+    if no_reg:
+        body["IdRegistro"] = no_reg
+        body["IdTabla"] = int(id_tabla) if id_tabla is not None else ID_TABLA_INCIDENCIAS_BC
+    nom_op = (nombre_operario or "").strip()
+    if nom_op:
+        body["NombreOperario"] = nom_op
     try:
         r = requests.post(url, json=body, headers=headers, timeout=45)
         if r.status_code == 200:
@@ -315,7 +345,7 @@ def notificar_whatsapp_asignacion_incidencia(
         if not tel:
             print(f"⚠️ WhatsApp: usuario {uid} sin teléfono válido (campo phone en GTask)")
             return
-        nombre = _nombre_usuario(u)
+        nombre = obtener_nombre_operario_gtask(u)
         no = numero_incidencia_columna_no(incidencia) or getattr(
             incidencia, "id_gtask", ""
         ) or ""
@@ -324,17 +354,30 @@ def notificar_whatsapp_asignacion_incidencia(
         fh = getattr(incidencia, "fecha_hora", None)
         hora_s = fh.strftime("%H:%M") if fh else ""
         tipo = (getattr(incidencia, "tipo_incidencia", None) or "").strip()
-        tipo_part = f" ({tipo})" if tipo else ""
+        subtipo = (getattr(incidencia, "subtipo_incidencia", None) or "").strip()
+        tipo_part = f" ({tipo}" + (f" / {subtipo}" if subtipo else "") + ")" if tipo else (f" ({subtipo})" if subtipo else "")
+        base_app = (GMALLA_PUBLIC_APP_URL or "").rstrip("/")
+        enlace = ""
+        if base_app and str(no).strip():
+            enlace = f"{base_app}/?id={quote(str(no).strip(), safe='')}"
         msg = (
             f"Hola {nombre}, se te ha asignado la incidencia nº {no}{tipo_part}"
             f" para el {fecha_s}"
             + (f" a las {hora_s}" if hora_s else "")
-            + ". — GMalla"
+            + "."
+            + (f"\n{enlace}" if enlace else "")
+            + "\n— GMalla"
         )
         if len(msg) > 4000:
             msg = msg[:3997] + "..."
         id_inc = numero_incidencia_columna_no(incidencia)
-        resp = _enviar_payload(tel, msg, id_incidencia_no=id_inc or None)
+        resp = _enviar_payload(
+            tel,
+            msg,
+            id_registro_no=id_inc or None,
+            id_tabla=ID_TABLA_INCIDENCIAS_BC,
+            nombre_operario=nombre,
+        )
         if resp:
             wid = wamid_desde_respuesta_apiwhats(resp) or ""
             if not wid:
@@ -344,7 +387,8 @@ def notificar_whatsapp_asignacion_incidencia(
                 id_mensaje=wid,
                 telefono=tel,
                 texto=msg,
-                id_incidencia=id_inc,
+                id_registro=id_inc,
+                id_tabla=ID_TABLA_INCIDENCIAS_BC,
             )
     except Exception as e:
         print(f"⚠️ WhatsApp asignación incidencia: {e}")
@@ -372,7 +416,7 @@ def notificar_whatsapp_asignaciones_automaticas(
             if not tel:
                 print(f"⚠️ WhatsApp: usuario {uid} sin teléfono válido (campo phone en GTask)")
                 continue
-            nombre = _nombre_usuario(u)
+            nombre = obtener_nombre_operario_gtask(u)
             lines = [
                 f"Hola {nombre}, se te han asignado {len(items)} incidencia(s) desde GMalla "
                 "(asignación automática):"
@@ -394,7 +438,13 @@ def notificar_whatsapp_asignaciones_automaticas(
             if len(msg) > 4000:
                 msg = msg[:3997] + "..."
             id_inc_join = ",".join(ids_inc) if ids_inc else ""
-            resp = _enviar_payload(tel, msg, id_incidencia_no=id_inc_join or None)
+            resp = _enviar_payload(
+                tel,
+                msg,
+                id_registro_no=id_inc_join or None,
+                id_tabla=ID_TABLA_INCIDENCIAS_BC,
+                nombre_operario=nombre,
+            )
             if resp:
                 wid = wamid_desde_respuesta_apiwhats(resp) or ""
                 if not wid:
@@ -404,7 +454,8 @@ def notificar_whatsapp_asignaciones_automaticas(
                     id_mensaje=wid,
                     telefono=tel,
                     texto=msg,
-                    id_incidencia=id_inc_join,
+                    id_registro=id_inc_join,
+                    id_tabla=ID_TABLA_INCIDENCIAS_BC,
                 )
     except Exception as e:
         print(f"⚠️ WhatsApp asignación automática: {e}")
@@ -420,10 +471,18 @@ def _descripcion_plana(html_o_texto: str, max_len: int = 500) -> str:
     return t
 
 
-def construir_mensaje_whatsapp_taller(detalle: Dict[str, Any], id_gtask: str) -> str:
-    """Texto único del aviso a todo el Taller (misma incidencia)."""
+def construir_mensaje_whatsapp_taller(
+    detalle: Dict[str, Any],
+    id_gtask: str,
+    *,
+    variante: int = 0,
+) -> str:
+    """Texto del aviso al Taller. `variante` rota el encabezado si WHATSAPP_TALLER_VARIAR_TEXTO."""
     no_bc = numero_incidencia_columna_no(detalle)
-    lines = ["📋 GMalla — Aviso Taller"]
+    encabezado = _TALLER_LINEAS_ENCABEZADO[
+        int(variante) % len(_TALLER_LINEAS_ENCABEZADO)
+    ]
+    lines = [encabezado]
     if no_bc:
         lines.append(f"Incidencia nº {no_bc}")
     else:
@@ -433,6 +492,9 @@ def construir_mensaje_whatsapp_taller(detalle: Dict[str, Any], id_gtask: str) ->
     tipo = (detalle.get("incidenceType") or "").strip()
     if tipo:
         lines.append(f"Tipo: {tipo}")
+    subtipo = (detalle.get("SubTipo_Incidencia") or detalle.get("subtipo_incidencia") or "").strip()
+    if subtipo:
+        lines.append(f"Subtipo incidencia: {subtipo}")
     rec = (detalle.get("resource") or detalle.get("recurso") or "").strip()
     rn = (detalle.get("resource_name") or "").strip()
     if rn or rec:
@@ -462,8 +524,9 @@ def notificar_whatsapp_taller_incidencia(
     departamento_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
-    Envía por WhatsApp el mismo aviso de incidencia a todos los usuarios GTask del departamento
-    Taller (por defecto) que tengan teléfono. Tras cada envío OK, notifica a BC como el resto de envíos.
+    Envía el aviso de incidencia a usuarios GTask del departamento Taller con teléfono.
+    Entre cada envío se espera WHATSAPP_TALLER_INTERVALO_SEG s (anti-spam Meta) y se puede rotar
+    el encabezado del mensaje (WHATSAPP_TALLER_VARIAR_TEXTO). Tras cada envío OK, notifica a BC.
     """
     dept = (departamento_id or GTASK_DEPARTAMENTO_TALLER_ID or "").strip()
     out: Dict[str, Any] = {
@@ -475,6 +538,10 @@ def notificar_whatsapp_taller_incidencia(
         "omitidos_duplicado_telefono": 0,
         "departamento_id": dept,
         "bc_notificaciones": [],
+        "anti_spam_taller": {
+            "intervalo_seg": WHATSAPP_TALLER_INTERVALO_SEG,
+            "variar_texto": WHATSAPP_TALLER_VARIAR_TEXTO,
+        },
     }
     if not _notificaciones_habilitadas():
         out["error"] = "WhatsApp no configurado (API_WHATS_URL) o notificaciones desactivadas"
@@ -498,10 +565,9 @@ def notificar_whatsapp_taller_incidencia(
     out["en_departamento"] = len(en_dept)
     out["con_telefono"] = sum(1 for u in en_dept if obtener_telefono_usuario(u))
 
-    msg = construir_mensaje_whatsapp_taller(detalle, id_gtask)
     id_inc = numero_incidencia_columna_no(detalle)
     vistos: set[str] = set()
-
+    destinos: List[Any] = []
     for u in en_dept:
         tel = obtener_telefono_usuario(u)
         if not tel:
@@ -510,8 +576,28 @@ def notificar_whatsapp_taller_incidencia(
             out["omitidos_duplicado_telefono"] += 1
             continue
         vistos.add(tel)
+        destinos.append((u, tel))
+
+    intervalo = WHATSAPP_TALLER_INTERVALO_SEG
+    variar = WHATSAPP_TALLER_VARIAR_TEXTO
+    if len(destinos) > 1 and intervalo > 0:
+        out["anti_spam_taller"]["espera_total_aprox_seg"] = round(
+            (len(destinos) - 1) * intervalo, 1
+        )
+
+    for i, (u, tel) in enumerate(destinos):
+        if i > 0 and intervalo > 0:
+            time.sleep(intervalo)
+        variante_i = i if variar else 0
+        msg = construir_mensaje_whatsapp_taller(detalle, id_gtask, variante=variante_i)
+        nom_t = obtener_nombre_operario_gtask(u)
         resp = _enviar_payload(
-            tel, msg, usuario_emisor="taller", id_incidencia_no=id_inc or None
+            tel,
+            msg,
+            usuario_emisor="taller",
+            id_registro_no=id_inc or None,
+            id_tabla=ID_TABLA_INCIDENCIAS_BC,
+            nombre_operario=nom_t,
         )
         if resp:
             out["enviados"] += 1
@@ -523,11 +609,12 @@ def notificar_whatsapp_taller_incidencia(
                 id_mensaje=wid,
                 telefono=tel,
                 texto=msg,
-                id_incidencia=id_inc,
+                id_registro=id_inc,
+                id_tabla=ID_TABLA_INCIDENCIAS_BC,
             )
             out["bc_notificaciones"].append(bc_res)
         else:
-            nom = _nombre_usuario(u)
+            nom = obtener_nombre_operario_gtask(u)
             out["errores"].append(f"No enviado a {nom} ({tel})")
 
     if out["enviados"] > 0:

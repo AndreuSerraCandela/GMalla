@@ -31,6 +31,7 @@ class Incidencia:
     no_series: str = ""  # Code[20]
     id_gtask: str = ""  # Text[30]
     tipo_incidencia: Optional[str] = None  # Enum "Tipo Incidencia"
+    subtipo_incidencia: Optional[str] = None  # Subtipo (BC: SubTipo_Incidencia)
     recurso: str = ""  # Code[20]
     tipo_elemento: TipoElemento = TipoElemento.RECURSO  # Option
     fecha_hora: Optional[datetime] = None  # DateTime
@@ -52,6 +53,7 @@ class Incidencia:
             "No. Series": self.no_series,
             "Id_Gtask": self.id_gtask,
             "Tipo Incidencia": self.tipo_incidencia,
+            "Subtipo Incidencia": self.subtipo_incidencia,
             "Recurso": self.recurso,
             "Tipo Elemento": self.tipo_elemento.value,
             "FechaHora": self.fecha_hora.isoformat() if self.fecha_hora else None,
@@ -84,6 +86,7 @@ class Incidencia:
         incidencia.id_gtask = data.get("Id_Gtask", "")
         # Manejar tanto "Tipo Incidencia" como "Tipo_Incidencia" (formato OData)
         incidencia.tipo_incidencia = data.get("Tipo Incidencia") or data.get("Tipo_Incidencia")
+        incidencia.subtipo_incidencia = data.get("Subtipo Incidencia") or data.get("SubTipo_Incidencia")
         incidencia.recurso = data.get("Recurso", "")
         if data.get("Tipo Elemento"):
             tipo_elem = data["Tipo Elemento"]

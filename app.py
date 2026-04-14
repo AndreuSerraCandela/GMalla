@@ -72,6 +72,7 @@ def _permisos_default():
     """Permisos por defecto: todo permitido."""
     return {
         "tipos_incidencia_visible": None,  # None = todos los tipos visibles
+        "subtipos_incidencia_visible": None,  # None = todos los subtipos visibles
         "comunicado_por_emt_visible": True,
         "puede_modificar": True,
         "puede_asignar": True,
@@ -366,6 +367,7 @@ def obtener_incidencias():
                 'recurso': inc.recurso,
                 'resource_name': resource_name or inc.recurso,
                 'tipo_incidencia': inc.tipo_incidencia,
+                'subtipo_incidencia': getattr(inc, 'subtipo_incidencia', None),
                 'usuario': inc.usuario,
                 'usuario_creador': getattr(inc, 'usuario_creador', None),
                 'comunicado_por_emt': getattr(inc, 'comunicado_por_emt', None),
@@ -489,6 +491,7 @@ def obtener_calendario():
                     'estado': inc.estado.value,
                     'recurso': inc.recurso,
                     'tipo_incidencia': inc.tipo_incidencia,
+                    'subtipo_incidencia': getattr(inc, 'subtipo_incidencia', None),
                     'usuario': inc.usuario
                 }
                 for inc in incidencias

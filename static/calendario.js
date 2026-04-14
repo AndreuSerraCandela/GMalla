@@ -7,7 +7,7 @@ let estado = {
     autenticado: false,
     usuarioActual: null,
     usuariosFiltrados: null, // null = todos, Set de IDs = usuarios filtrados
-    permisos: null,  // { tipos_incidencia_visible, comunicado_por_emt_visible, puede_modificar, puede_asignar, puede_imprimir }
+    permisos: null,  // { tipos_incidencia_visible, subtipos_incidencia_visible, comunicado_por_emt_visible, puede_modificar, puede_asignar, puede_imprimir }
     isAdmin: false,
     miniCalendarioMes: null,
     miniCalendarioAño: null,
@@ -20,6 +20,9 @@ let vistaListaEstado = {
     sortCol: 'fecha',
     sortDir: -1 // -1 desc, 1 asc
 };
+
+/** Valor interno para incidencias sin subtipo (filtros y permisos). */
+const SUBTIPO_FILTRO_SIN_VALOR = '__sin_subtipo__';
 
 // Inicialización
 document.addEventListener('DOMContentLoaded', () => {
@@ -203,11 +206,11 @@ async function cargarPermisos() {
             estado.permisos = data.permisos || {};
             estado.isAdmin = !!data.is_admin;
         } else {
-            estado.permisos = { comunicado_por_emt_visible: true, puede_modificar: true, puede_asignar: true, puede_imprimir: true, tipos_incidencia_visible: null };
+            estado.permisos = { comunicado_por_emt_visible: true, puede_modificar: true, puede_asignar: true, puede_imprimir: true, tipos_incidencia_visible: null, subtipos_incidencia_visible: null };
             estado.isAdmin = false;
         }
     } catch (e) {
-        estado.permisos = { comunicado_por_emt_visible: true, puede_modificar: true, puede_asignar: true, puede_imprimir: true, tipos_incidencia_visible: null };
+        estado.permisos = { comunicado_por_emt_visible: true, puede_modificar: true, puede_asignar: true, puede_imprimir: true, tipos_incidencia_visible: null, subtipos_incidencia_visible: null };
         estado.isAdmin = false;
     }
     actualizarUIAutenticacion();
@@ -257,6 +260,7 @@ async function cargarPermisosAdmin() {
         const usuarios = dataUsers.usuarios || [];
         const permisos = dataPermisos.permisos || {};
         const tiposIncidencia = obtenerTiposIncidenciaUnicos();
+        const subtiposIncidencia = obtenerSubtiposIncidenciaUnicos();
         const container = document.getElementById('permisos-lista-usuarios');
         container.innerHTML = '';
         usuarios.forEach(u => {
@@ -273,6 +277,16 @@ async function cargarPermisosAdmin() {
                     const checked = todosTipos || tiposPermitidosSet.has(String(tipo).trim());
                     return `<label class="permisos-tipo-item"><input type="checkbox" data-key="${escapeHtml(key)}" data-opt="tipos_incidencia_visible" value="${escapeHtml(tipo)}" ${checked ? 'checked' : ''}> ${escapeHtml(tipo)}</label>`;
                 }).join('') + '</div>';
+            const subList = p.subtipos_incidencia_visible;
+            const todosSubtipos = !Array.isArray(subList) || subList.length === 0;
+            const subtiposPermitidosSet = new Set(Array.isArray(subList) ? subList.map(t => String(t).trim()) : []);
+            const subtiposCheckboxes = subtiposIncidencia.length === 0
+                ? '<p class="permisos-tipos-aviso">No hay subtipos cargados. Refresca las incidencias para ver la lista.</p>'
+                : '<div class="permisos-tipos-lista">' + subtiposIncidencia.map(st => {
+                    const checked = todosSubtipos || subtiposPermitidosSet.has(String(st).trim());
+                    const etiqueta = etiquetaSubtipoFiltro(st);
+                    return `<label class="permisos-tipo-item"><input type="checkbox" data-key="${escapeHtml(key)}" data-opt="subtipos_incidencia_visible" value="${escapeHtml(st)}" ${checked ? 'checked' : ''}> ${escapeHtml(etiqueta)}</label>`;
+                }).join('') + '</div>';
             const div = document.createElement('div');
             div.className = 'permisos-usuario';
             div.innerHTML = `
@@ -283,6 +297,7 @@ async function cargarPermisosAdmin() {
                     <label><input type="checkbox" data-key="${escapeHtml(key)}" data-opt="puede_asignar" ${(p.puede_asignar !== false) ? 'checked' : ''}> Asignar incidencias</label>
                     <label><input type="checkbox" data-key="${escapeHtml(key)}" data-opt="puede_imprimir" ${(p.puede_imprimir !== false) ? 'checked' : ''}> Imprimir incidencias</label>
                     <div class="permisos-tipos"><label>Tipos visibles (todos marcados = todos):</label>${tiposCheckboxes}</div>
+                    <div class="permisos-tipos"><label>Subtipos visibles (todos marcados = todos):</label>${subtiposCheckboxes}</div>
                 </div>
             `;
             container.appendChild(div);
@@ -299,18 +314,22 @@ async function guardarPermisos() {
     const msg = document.getElementById('permisos-mensaje');
     const container = document.getElementById('permisos-lista-usuarios');
     const tiposIncidencia = obtenerTiposIncidenciaUnicos();
+    const subtiposIncidencia = obtenerSubtiposIncidenciaUnicos();
     const permisos = {};
     container.querySelectorAll('.permisos-usuario').forEach(div => {
         const key = div.querySelector('[data-opt="comunicado_por_emt_visible"]')?.dataset?.key;
         if (!key) return;
         const tiposChecked = Array.from(div.querySelectorAll('input[data-opt="tipos_incidencia_visible"]:checked')).map(cb => cb.value.trim()).filter(Boolean);
         const todosMarcados = tiposIncidencia.length > 0 && tiposChecked.length === tiposIncidencia.length;
+        const subtiposChecked = Array.from(div.querySelectorAll('input[data-opt="subtipos_incidencia_visible"]:checked')).map(cb => cb.value.trim()).filter(Boolean);
+        const todosSubMarcados = subtiposIncidencia.length > 0 && subtiposChecked.length === subtiposIncidencia.length;
         permisos[key] = {
             comunicado_por_emt_visible: !!div.querySelector('input[data-opt="comunicado_por_emt_visible"]')?.checked,
             puede_modificar: !!div.querySelector('input[data-opt="puede_modificar"]')?.checked,
             puede_asignar: !!div.querySelector('input[data-opt="puede_asignar"]')?.checked,
             puede_imprimir: !!div.querySelector('input[data-opt="puede_imprimir"]')?.checked,
-            tipos_incidencia_visible: (tiposIncidencia.length === 0 || todosMarcados) ? null : tiposChecked
+            tipos_incidencia_visible: (tiposIncidencia.length === 0 || todosMarcados) ? null : tiposChecked,
+            subtipos_incidencia_visible: (subtiposIncidencia.length === 0 || todosSubMarcados) ? null : subtiposChecked
         };
     });
     btn.disabled = true;
@@ -327,6 +346,9 @@ async function guardarPermisos() {
             msg.textContent = '✅ ' + (data.message || 'Guardado correctamente');
             msg.className = 'guardar-mensaje guardar-mensaje-success';
             await cargarPermisos();
+            generarFiltrosTipos();
+            generarFiltrosSubtipos();
+            actualizarVista();
         } else {
             msg.textContent = '❌ ' + (data.error || 'Error al guardar');
             msg.className = 'guardar-mensaje guardar-mensaje-error';
@@ -455,6 +477,7 @@ async function cargarDatos() {
     
     // Generar sidebar (el mini calendario se sincronizará automáticamente con la semana visible)
     generarFiltrosTipos();
+    generarFiltrosSubtipos();
 
     if (estado.autenticado) {
         intentarAbrirDetalleDesdeUrl();
@@ -571,6 +594,8 @@ async function cargarIncidencias() {
             organizarIncidencias();
             // Actualizar la vista activa (lista o calendario)
             actualizarVista();
+            generarFiltrosTipos();
+            generarFiltrosSubtipos();
         } else {
             console.error('Error al cargar incidencias:', data.error);
             estado.incidencias = [];
@@ -1121,6 +1146,12 @@ function debeMostrarIncidencia(incidencia) {
         const tipo = (incidencia.tipo_incidencia || '').trim();
         if (!tiposPermitidos.some(t => String(t).trim() === tipo)) return false;
     }
+    const subtiposPermitidos = estado.permisos && estado.permisos.subtipos_incidencia_visible;
+    if (Array.isArray(subtiposPermitidos) && subtiposPermitidos.length > 0) {
+        const subRaw = (incidencia.subtipo_incidencia || '').trim();
+        const subKey = subRaw || SUBTIPO_FILTRO_SIN_VALOR;
+        if (!subtiposPermitidos.some(t => String(t).trim() === subKey)) return false;
+    }
     // Filtro Comunicado por EMT: si solo está marcado "Sí" o solo "No", filtrar
     const containerEMT = document.getElementById('filtro-comunicado-emt-container');
     if (containerEMT) {
@@ -1136,26 +1167,33 @@ function debeMostrarIncidencia(incidencia) {
     }
     
     const checkboxes = document.querySelectorAll('.filtro-tipo-checkbox');
-    if (checkboxes.length === 0) return true; // Si no hay filtros, mostrar todas
-    
-    const tipoIncidencia = incidencia.tipo_incidencia || '';
-    let algunoSeleccionado = false;
-    let tipoSeleccionado = false;
-    
-    checkboxes.forEach(checkbox => {
-        if (checkbox.checked) {
-            algunoSeleccionado = true;
-            if (checkbox.value === tipoIncidencia) {
-                tipoSeleccionado = true;
+    if (checkboxes.length > 0) {
+        const tipoIncidencia = incidencia.tipo_incidencia || '';
+        let algunoSeleccionado = false;
+        let tipoSeleccionado = false;
+        checkboxes.forEach(checkbox => {
+            if (checkbox.checked) {
+                algunoSeleccionado = true;
+                if (checkbox.value === tipoIncidencia) tipoSeleccionado = true;
             }
-        }
-    });
-    
-    // Si no hay ningún tipo seleccionado, mostrar todas
-    if (!algunoSeleccionado) return true;
-    
-    // Si el tipo de la incidencia está seleccionado, mostrarla
-    return tipoSeleccionado;
+        });
+        if (algunoSeleccionado && !tipoSeleccionado) return false;
+    }
+
+    const checkboxesSub = document.querySelectorAll('.filtro-subtipo-checkbox');
+    if (checkboxesSub.length > 0) {
+        const subKey = (incidencia.subtipo_incidencia || '').trim() || SUBTIPO_FILTRO_SIN_VALOR;
+        let algunoSub = false;
+        let subSel = false;
+        checkboxesSub.forEach(cb => {
+            if (cb.checked) {
+                algunoSub = true;
+                if (cb.value === subKey) subSel = true;
+            }
+        });
+        if (algunoSub && !subSel) return false;
+    }
+    return true;
 }
 
 // Caché para tipos ya mapeados (mejora el rendimiento)
@@ -1520,6 +1558,7 @@ function generarVistaLista() {
             const no = (inc.no || '').toLowerCase();
             const desc = (inc.descripcion || '').toLowerCase();
             const tipo = (inc.tipo_incidencia || '').toLowerCase();
+            const subtipo = (inc.subtipo_incidencia || '').toLowerCase();
             const recursoNombre = (inc.resource_name || '').toLowerCase();
             const recursoNum = (inc.recurso || '').toLowerCase();
             const dir = (inc.direccion || inc.address || '').toLowerCase();
@@ -1528,7 +1567,7 @@ function generarVistaLista() {
             const creador = (inc.usuario_creador || '').toLowerCase();
             const creadorNombre = nombreUsuario(inc.usuario_creador).toLowerCase();
             const comunicadoEMT = (inc.comunicado_por_emt ? 'sí' : 'no');
-            return no.includes(q) || desc.includes(q) || tipo.includes(q)
+            return no.includes(q) || desc.includes(q) || tipo.includes(q) || subtipo.includes(q)
                 || recursoNombre.includes(q) || recursoNum.includes(q)
                 || dir.includes(q) || user.includes(q) || userNombre.includes(q) || creador.includes(q) || creadorNombre.includes(q)
                 || comunicadoEMT.includes(q);
@@ -1542,6 +1581,7 @@ function generarVistaLista() {
         if (c === 'fecha') return inc.fecha_hora ? new Date(inc.fecha_hora).getTime() : (inc.fecha ? new Date(inc.fecha).getTime() : 0);
         if (c === 'descripcion') return (inc.descripcion || '').toLowerCase();
         if (c === 'tipo') return (inc.tipo_incidencia || '').toLowerCase();
+        if (c === 'subtipo') return (inc.subtipo_incidencia || '').toLowerCase();
         if (c === 'comunicado_emt') return inc.comunicado_por_emt ? 'sí' : 'no';
         if (c === 'recurso') return (inc.resource_name || inc.recurso || '').toLowerCase();
         if (c === 'usuario_creador') return (obtenerNombreUsuario(inc.usuario_creador) || '').toLowerCase();
@@ -1573,7 +1613,7 @@ function generarVistaLista() {
     if (incidencias.length === 0) {
         const tr = document.createElement('tr');
         const msgFiltro = vistaListaEstado.filtro ? 'No hay coincidencias con el filtro.' : 'No hay incidencias que mostrar. Usa "Refrescar" para cargar datos.';
-        tr.innerHTML = '<td colspan="9" class="vista-lista-empty">' + msgFiltro + '</td>';
+        tr.innerHTML = '<td colspan="10" class="vista-lista-empty">' + msgFiltro + '</td>';
         tbody.appendChild(tr);
         return;
     }
@@ -1594,6 +1634,7 @@ function generarVistaLista() {
         const descripcion = (inc.descripcion || '-').substring(0, 120) + ((inc.descripcion && inc.descripcion.length > 120) ? '...' : '');
         const recurso = formatearRecursoDisplay(inc);
         const tipoIncidencia = inc.tipo_incidencia || '-';
+        const subtipoIncidencia = inc.subtipo_incidencia || '-';
         const comunicadoEMT = inc.comunicado_por_emt ? 'Sí' : 'No';
         const creadoPor = obtenerNombreUsuario(inc.usuario_creador);
         const usuarioAsignado = obtenerNombreUsuario(inc.usuario);
@@ -1611,11 +1652,12 @@ function generarVistaLista() {
             <td class="vista-lista-fecha">${fechaStr}</td>
             <td class="vista-lista-descripcion" title="${(inc.descripcion || '').replace(/"/g, '&quot;')}">${escapeHtml(descripcion)}</td>
             <td class="vista-lista-tipo">${escapeHtml(tipoIncidencia)}</td>
+            <td class="vista-lista-subtipo">${escapeHtml(subtipoIncidencia)}</td>
             <td class="vista-lista-comunicado-emt">${comunicadoEMT}</td>
             <td class="vista-lista-recurso">${escapeHtml(recurso)}</td>
             <td class="vista-lista-creador">${escapeHtml(creadoPor)}</td>
             <td class="vista-lista-usuario">${escapeHtml(usuarioAsignado)}</td>
-            <td class="vista-lista-acciones">${botonesAcciones || '—'}</td>
+            <td class="col-acciones vista-lista-td-acciones"><div class="vista-lista-acciones">${botonesAcciones || '—'}</div></td>
         `;
         if (puedeModificar) tr.querySelector('.btn-editar-lista')?.addEventListener('click', () => abrirDetalleIncidencia(idGtask));
         if (puedeImprimir) tr.querySelector('.btn-imprimir-lista')?.addEventListener('click', async () => {
@@ -1780,6 +1822,7 @@ function crearElementoIncidenciaSimplificado(incidencia) {
     const descripcion = incidencia.descripcion || 'Sin descripción';
     const descripcionCorta = descripcion.length > 10 ? descripcion.substring(0, 10) + '...' : descripcion;
     const recurso = formatearRecursoDisplay(incidencia);
+    const subtipoLibre = (incidencia.subtipo_incidencia && String(incidencia.subtipo_incidencia).trim()) || '';
     const urlImagen = incidencia.url_primera_imagen || null;
     
     // Crear tooltip con descripción completa e imagen
@@ -1792,7 +1835,7 @@ function crearElementoIncidenciaSimplificado(incidencia) {
     
     div.innerHTML = `
         <div class="incidencia-libre-header">
-            <span class="incidencia-libre-no">${incidencia.no}</span>
+            <span class="incidencia-libre-no">${escapeHtml(String(incidencia.no))}${subtipoLibre ? ` <span class="incidencia-libre-subtipo">· ${escapeHtml(subtipoLibre)}</span>` : ''}</span>
             <span class="incidencia-libre-editar" data-id-gtask="${incidencia.id_gtask || incidencia.no}" title="Ver detalle">✎</span>
         </div>
         <div class="incidencia-libre-linea2">
@@ -2174,6 +2217,12 @@ function mostrarDetalleIncidencia(detalle) {
         }
     }
     
+    const detalleTipoStr = (detalle.incidenceType != null && String(detalle.incidenceType).trim() !== '')
+        ? String(detalle.incidenceType).trim() : 'N/A';
+    const rawSubtipoDetalle = detalle.subIncidenceType != null ? detalle.subIncidenceType : detalle.subIncidenceType;
+    const detalleSubtipoStr = (rawSubtipoDetalle != null && String(rawSubtipoDetalle).trim() !== '')
+        ? String(rawSubtipoDetalle).trim() : 'N/A';
+    
     // Limpiar HTML de la descripción para el textarea
     let descripcionTexto = detalle.description || 'Sin descripción';
     const tempDiv = document.createElement('div');
@@ -2202,12 +2251,16 @@ function mostrarDetalleIncidencia(detalle) {
             <div style="display: flex; gap: 20px; align-items: flex-start;">
                 <div class="detalle-campo" style="flex: 1;">
                     <label>Tipo de Incidencia:</label>
-                    <p>${detalle.incidenceType || 'N/A'}</p>
+                    <p>${escapeHtml(detalleTipoStr)}</p>
                 </div>
                 <div class="detalle-campo" style="flex: 1;">
-                    <label>Creado por:</label>
-                    <p class="detalle-campo-solo-lectura">${escapeHtml(nombreCreador || 'N/A')}</p>
+                    <label>Subtipo incidencia:</label>
+                    <p class="detalle-campo-solo-lectura">${escapeHtml(detalleSubtipoStr)}</p>
                 </div>
+            </div>
+            <div class="detalle-campo">
+                <label>Creado por:</label>
+                <p class="detalle-campo-solo-lectura">${escapeHtml(nombreCreador || 'N/A')}</p>
             </div>
             <div style="display: flex; gap: 20px; align-items: flex-start;">
                 <div class="detalle-campo" style="flex: 1;">
@@ -2637,7 +2690,12 @@ async function notificarWhatsappTaller() {
         alert('No tiene permiso para esta acción.');
         return;
     }
-    if (!confirm('¿Enviar aviso por WhatsApp a todo el personal de Taller con teléfono registrado en GTask?')) {
+    if (
+        !confirm(
+            '¿Enviar aviso por WhatsApp a todo el personal de Taller con teléfono registrado en GTask?\n\n' +
+                'Entre cada destinatario se dejará una pausa de unos segundos y el texto del encabezado variará ligeramente, para reducir bloqueos de WhatsApp (Meta). Si hay muchos usuarios, el envío puede tardar más de un minuto.'
+        )
+    ) {
         return;
     }
     const btn = document.getElementById('whatsapp-taller-btn');
@@ -2670,6 +2728,20 @@ async function notificarWhatsappTaller() {
             }
             if (data.errores && data.errores.length) {
                 msg += `\n\nEnvíos fallidos:\n${data.errores.join('\n')}`;
+            }
+            const as = data.anti_spam_taller;
+            if (as && typeof as === 'object') {
+                const iv = as.intervalo_seg;
+                const vt = as.variar_texto;
+                const tot = as.espera_total_aprox_seg;
+                const bits = [];
+                if (iv != null && Number(iv) > 0) bits.push(`${iv} s entre cada envío`);
+                if (vt === true) bits.push('texto con encabezado distinto por persona');
+                else if (vt === false) bits.push('mismo formato de mensaje');
+                if (tot != null && Number(tot) > 0) bits.push(`~${tot} s de espera acumulada`);
+                if (bits.length) {
+                    msg += `\n\nAnti-spam (GMalla → Apiwhats): ${bits.join('; ')}.`;
+                }
             }
             if (data.bc_notificaciones && data.bc_notificaciones.length) {
                 const bc = data.bc_notificaciones;
@@ -2836,14 +2908,19 @@ async function generarPDF(detalle, idGtask) {
         doc.text(fechaTexto, margin + mitadAncho + 20, yPos);
         yPos += lineHeight + 3;
         
-        // Tipo de Incidencia y Usuario en la misma línea
+        // Tipo de Incidencia
         doc.setFont('helvetica', 'bold');
         doc.text('Tipo de Incidencia:', margin, yPos);
         doc.setFont('helvetica', 'normal');
-        doc.text(detalle.incidenceType || 'N/A', margin + 45, yPos);
+        doc.text(String(detalle.incidenceType || 'N/A'), margin + 45, yPos);
+        yPos += lineHeight + 3;
         
-        // Usuario a la derecha
-        
+        const subtipoPdfRaw = detalle.subIncidenceType != null ? detalle.subIncidenceType : detalle.subIncidenceType;
+        const subtipoPdf = (subtipoPdfRaw != null && String(subtipoPdfRaw).trim() !== '') ? String(subtipoPdfRaw).trim() : '';
+        doc.setFont('helvetica', 'bold');
+        doc.text('Subtipo incidencia:', margin, yPos);
+        doc.setFont('helvetica', 'normal');
+        doc.text(subtipoPdf || 'N/A', margin + 45, yPos);
         yPos += lineHeight + 3;
         
         // Descripción debajo del Tipo de Incidencia
@@ -3783,6 +3860,23 @@ function obtenerTiposIncidenciaUnicos() {
     return Array.from(tiposUnicos).sort((a, b) => String(a).localeCompare(String(b), 'es'));
 }
 
+function etiquetaSubtipoFiltro(valor) {
+    return valor === SUBTIPO_FILTRO_SIN_VALOR ? '(Sin subtipo)' : String(valor);
+}
+
+function obtenerSubtiposIncidenciaUnicos() {
+    const set = new Set();
+    let haySinSubtipo = false;
+    (estado.incidencias || []).forEach(inc => {
+        const s = (inc.subtipo_incidencia && String(inc.subtipo_incidencia).trim()) || '';
+        if (s) set.add(s);
+        else haySinSubtipo = true;
+    });
+    const arr = Array.from(set).sort((a, b) => String(a).localeCompare(String(b), 'es'));
+    if (haySinSubtipo) arr.unshift(SUBTIPO_FILTRO_SIN_VALOR);
+    return arr;
+}
+
 // Generar filtros de tipos de incidencias
 function generarFiltrosTipos() {
     const container = document.getElementById('tipos-incidencias-filtro');
@@ -3837,6 +3931,58 @@ function generarFiltrosTipos() {
     
     // Agregar event listeners
     container.querySelectorAll('.filtro-tipo-checkbox').forEach(checkbox => {
+        checkbox.addEventListener('change', () => {
+            actualizarVista();
+        });
+    });
+}
+
+// Filtros por subtipo (misma lógica que tipos; permisos subtipos_incidencia_visible)
+function generarFiltrosSubtipos() {
+    const container = document.getElementById('subtipos-incidencias-filtro');
+    if (!container) return;
+
+    const subtiposUnicos = obtenerSubtiposIncidenciaUnicos();
+    const subtiposPermitidos = estado.permisos && estado.permisos.subtipos_incidencia_visible;
+    let subtiposAMostrar = [...subtiposUnicos];
+    if (Array.isArray(subtiposPermitidos) && subtiposPermitidos.length > 0) {
+        subtiposAMostrar = subtiposAMostrar.filter(s => subtiposPermitidos.some(p => String(p).trim() === String(s).trim()));
+    }
+
+    if (subtiposAMostrar.length === 0) {
+        container.innerHTML = '<p style="color: #999; font-size: 0.85rem;">No hay subtipos visibles</p>';
+        return;
+    }
+
+    let html = '';
+    subtiposAMostrar.forEach((st, idx) => {
+        const id = `filtro-subtipo-${idx}`;
+        const etiqueta = etiquetaSubtipoFiltro(st);
+        const tipoClase = obtenerColorPorTipo('');
+        const tempDiv = document.createElement('div');
+        tempDiv.className = `incidencia ${tipoClase}`;
+        tempDiv.style.position = 'absolute';
+        tempDiv.style.visibility = 'hidden';
+        document.body.appendChild(tempDiv);
+        const estilo = window.getComputedStyle(tempDiv);
+        const bgColor = estilo.backgroundColor;
+        document.body.removeChild(tempDiv);
+
+        html += `
+            <div class="tipo-filtro-item">
+                <input type="checkbox" id="${id}" 
+                       value="${escapeHtml(st)}" checked class="filtro-subtipo-checkbox">
+                <div class="tipo-filtro-color" style="background-color: ${bgColor}"></div>
+                <label for="${id}" style="cursor: pointer; font-size: 0.85rem;">
+                    ${escapeHtml(etiqueta)}
+                </label>
+            </div>
+        `;
+    });
+
+    container.innerHTML = html;
+
+    container.querySelectorAll('.filtro-subtipo-checkbox').forEach(checkbox => {
         checkbox.addEventListener('change', () => {
             actualizarVista();
         });

@@ -182,7 +182,7 @@ class GTaskClient:
             for usuario in usuarios:
                 # El ID puede estar en diferentes campos según la estructura de la API
                 if (usuario.get('id') == usuario_id or 
-                    usuario.get('Id') == usuario_id or
+                    usuario.get('_id') == usuario_id or
                     usuario.get('user_id') == usuario_id or
                     usuario.get('userId') == usuario_id):
                     return usuario

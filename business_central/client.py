@@ -194,6 +194,7 @@ class BusinessCentralClient:
                             "Descripción": inc_data.get("Descripción", ""),
                             "Recurso": inc_data.get("Recurso", ""),
                             "Tipo Incidencia": inc_data.get("Tipo_Incidencia"),
+                            "Subtipo Incidencia": inc_data.get("SubTipo_Incidencia"),
                             "Estado": inc_data.get("Estado", "Abierta"),
                             "FechaHora": fecha_hora_str,
                             "Fecha": fecha.isoformat() if fecha else None,
@@ -333,7 +334,7 @@ class BusinessCentralClient:
                 "_id": id_gtask,
                 "state": estado_bc,
                 "incidenceType": incidencia.tipo_incidencia or "",
-                "observation": descripcion_limpia,
+                "observation": "",
                 "description": descripcion_limpia,
                 "resource": incidencia.recurso or "",
                 "user": incidencia.usuario_creador or "",  # Creador (Id_Uduario_Gtask), no se modifica
@@ -564,7 +565,7 @@ class BusinessCentralClient:
     def notificar_respuesta_whatsapp(self, inner: Dict[str, Any]) -> tuple[bool, Optional[str]]:
         """
         POST al servicio OData postRespuestaWhatsApp (jsonText), mismo patrón que Apiwhats → BC.
-        inner suele incluir: id_mensaje, telefono, texto; GMalla añade id_incidencia.
+        inner suele incluir: id_mensaje, telefono, texto; GMalla añade id_registro e id_tabla.
         """
         try:
             if not inner.get("id_mensaje"):
@@ -573,11 +574,11 @@ class BusinessCentralClient:
             _bc_log.info(
                 "postRespuestaWhatsApp POST %s Nº=%s wamid=%s…",
                 url,
-                inner.get("id_incidencia"),
+                inner.get("id_registro"),
                 str(inner.get("id_mensaje", ""))[:32],
             )
             print(
-                f"[BC postRespuestaWhatsApp] POST {url} | Nº incidencia={inner.get('id_incidencia')} | "
+                f"[BC postRespuestaWhatsApp] POST {url} | id_registro={inner.get('id_registro')} | "
                 f"wamid={str(inner.get('id_mensaje', ''))[:40]}…"
             )
             json_text = json.dumps(inner, ensure_ascii=False)
@@ -625,7 +626,7 @@ class BusinessCentralClient:
             except (json.JSONDecodeError, TypeError, ValueError):
                 pass
             print(
-                f"✅ BC postRespuestaWhatsApp OK | Nº={inner.get('id_incidencia')} | "
+                f"✅ BC postRespuestaWhatsApp OK | id_registro={inner.get('id_registro')} | "
                 f"wamid={inner.get('id_mensaje', '')[:56]}…"
             )
             return True, None

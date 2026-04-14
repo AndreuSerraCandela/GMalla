@@ -103,6 +103,12 @@
                 </div>
             </div>
             <div class="sidebar-section">
+                <h3>Subtipos incidencia</h3>
+                <div id="subtipos-incidencias-filtro" class="tipos-filtro">
+                    <!-- Checkboxes por subtipo (valor vacío = «Sin subtipo») -->
+                </div>
+            </div>
+            <div class="sidebar-section">
                 <h3>Vista</h3>
                 <div class="vista-selector">
                     <select id="vista-tipo-select" class="vista-tipo-select" title="Tipo de vista">
@@ -218,7 +224,7 @@
                 <h2 id="vista-lista-titulo">Todas las tareas</h2>
                 <div class="vista-lista-filtro">
                     <label for="vista-lista-input-filtro">Buscar:</label>
-                    <input type="text" id="vista-lista-input-filtro" class="vista-lista-input-filtro" placeholder="Filtrar por Nº, descripción, tipo, Comunicado por EMT, recurso, usuario..." autocomplete="off">
+                    <input type="text" id="vista-lista-input-filtro" class="vista-lista-input-filtro" placeholder="Filtrar por Nº, descripción, tipo, subtipo, Comunicado por EMT, recurso, usuario..." autocomplete="off">
                 </div>
             </div>
             <div class="vista-lista-table-wrapper">
@@ -229,6 +235,7 @@
                             <th scope="col" class="sortable" data-sort="fecha">Fecha <span class="sort-icon"></span></th>
                             <th scope="col" class="sortable" data-sort="descripcion">Descripción <span class="sort-icon"></span></th>
                             <th scope="col" class="sortable" data-sort="tipo">Tipo incidencia <span class="sort-icon"></span></th>
+                            <th scope="col" class="sortable" data-sort="subtipo">Subtipo incidencia <span class="sort-icon"></span></th>
                             <th scope="col" class="sortable" data-sort="comunicado_emt">Comunicado por EMT <span class="sort-icon"></span></th>
                             <th scope="col" class="sortable" data-sort="recurso">Recurso / Parada <span class="sort-icon"></span></th>
                             <th scope="col" class="sortable" data-sort="usuario_creador">Creado por <span class="sort-icon"></span></th>

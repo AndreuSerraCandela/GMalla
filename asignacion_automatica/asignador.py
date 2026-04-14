@@ -229,6 +229,7 @@ class AsignadorAutomatico:
                 'no': incidencia.no,
                 'recurso': incidencia.recurso,
                 'tipo_incidencia': incidencia.tipo_incidencia,
+                'subtipo_incidencia': getattr(incidencia, 'subtipo_incidencia', None),
                 'descripcion': incidencia.descripcion[:200] if incidencia.descripcion else '',
                 'fecha_original': incidencia.fecha.isoformat() if incidencia.fecha else None,
                 'coordenadas': {

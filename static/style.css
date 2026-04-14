@@ -528,6 +528,7 @@ body {
 .vista-lista-tabla td {
     padding: 8px 12px;
     border-bottom: 1px solid #eee;
+    vertical-align: top;
 }
 .vista-lista-tabla tbody tr:hover {
     background: #f8f8f8;
@@ -536,10 +537,19 @@ body {
     white-space: nowrap;
     width: 1%;
 }
+/* No usar display:flex en el <td>: rompe la altura de fila y el borde inferior bajo los botones */
+.vista-lista-tabla tbody td.col-acciones {
+    vertical-align: middle;
+    text-align: right;
+}
 .vista-lista-fecha { white-space: nowrap; }
 .vista-lista-no { font-weight: 600; white-space: nowrap; }
 .vista-lista-descripcion { max-width: 280px; overflow: hidden; text-overflow: ellipsis; }
 .vista-lista-tipo { white-space: nowrap; }
+.vista-lista-subtipo {
+    max-width: 14em;
+    word-break: break-word;
+}
 .vista-lista-comunicado-emt { white-space: nowrap; text-align: center; }
 .vista-lista-recurso { white-space: nowrap; }
 .vista-lista-creador { white-space: nowrap; }
@@ -553,6 +563,7 @@ body {
     display: flex;
     gap: 6px;
     align-items: center;
+    justify-content: flex-end;
 }
 .btn-editar-lista,
 .btn-imprimir-lista {
@@ -665,9 +676,22 @@ body {
 }
 
 .modal-detalle {
+    position: relative;
     max-width: 800px;
     max-height: 90vh;
     overflow-y: auto;
+}
+
+/* La X no usa float: compite con la cabecera en móvil y se superpone a los botones */
+.modal-content.modal-detalle > .close {
+    float: none;
+    position: absolute;
+    top: 10px;
+    right: 12px;
+    z-index: 10;
+    line-height: 1;
+    padding: 4px 8px;
+    margin: 0;
 }
 
 .modal-permisos {
@@ -778,14 +802,19 @@ body {
 .modal-header-detalle {
     display: flex;
     justify-content: space-between;
-    align-items: center;
+    align-items: flex-start;
+    gap: 12px;
     margin-bottom: 5px;
     padding-bottom: 5px;
+    padding-right: 44px; /* hueco para el cierre (×) */
     border-bottom: 2px solid #eee;
 }
 
 .modal-header-detalle h2 {
     margin: 0;
+    flex: 1 1 auto;
+    min-width: 0;
+    line-height: 1.25;
 }
 
 .modal-detalle-botones-header {
@@ -793,6 +822,9 @@ body {
     flex-direction: column;
     align-items: flex-end;
     gap: 8px;
+    flex: 0 1 auto;
+    min-width: 0;
+    max-width: 100%;
 }
 
 .btn-imprimir-pdf {
@@ -805,6 +837,8 @@ body {
     font-size: 0.95em;
     font-weight: 500;
     transition: background 0.3s;
+    max-width: 100%;
+    box-sizing: border-box;
 }
 
 .btn-imprimir-pdf:hover {
@@ -825,7 +859,10 @@ body {
     font-size: 0.9em;
     font-weight: 500;
     transition: background 0.25s, transform 0.1s;
-    white-space: nowrap;
+    white-space: normal;
+    text-align: center;
+    max-width: 100%;
+    box-sizing: border-box;
 }
 
 .btn-whatsapp-taller:hover {
@@ -839,6 +876,12 @@ body {
 .btn-whatsapp-taller:disabled {
     opacity: 0.65;
     cursor: not-allowed;
+}
+
+@media (min-width: 769px) {
+    .btn-whatsapp-taller {
+        white-space: nowrap;
+    }
 }
 
 .close {
@@ -2162,6 +2205,12 @@ select.detalle-select-usuario {
     flex: 1;
 }
 
+.incidencia-libre-subtipo {
+    font-weight: 500;
+    color: #666;
+    font-size: 0.92em;
+}
+
 .incidencia-libre-editar {
     cursor: pointer;
     font-size: 0.70em;
@@ -2542,6 +2591,42 @@ select.detalle-select-usuario {
     .top-bar-container {
         flex-wrap: wrap;
         gap: 10px;
+    }
+
+    /* Modal detalle incidencia: cabecera legible sin solapes en móvil */
+    .modal-content.modal-detalle {
+        margin: 12px auto;
+        padding: 18px 14px 20px;
+        width: 94%;
+        max-width: none;
+    }
+
+    .modal-content.modal-detalle > .close {
+        top: 8px;
+        right: 8px;
+    }
+
+    .modal-header-detalle {
+        flex-direction: column;
+        align-items: stretch;
+        padding-right: 40px;
+        gap: 10px;
+    }
+
+    .modal-header-detalle h2 {
+        font-size: 1.05rem;
+    }
+
+    .modal-detalle-botones-header {
+        align-items: stretch;
+        width: 100%;
+    }
+
+    .modal-detalle-botones-header .btn-imprimir-pdf,
+    .modal-detalle-botones-header .btn-whatsapp-taller {
+        width: 100%;
+        padding: 10px 12px;
+        font-size: 0.88em;
     }
 }
 

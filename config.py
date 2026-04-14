@@ -42,8 +42,11 @@ PERMISOS_FILE = BASE_DIR / "permisos.json"
 # Configuración de LLM local
 LLM_BASE_URL = os.getenv("LLM_BASE_URL", "http://192.168.10.238:1234")
 
+# URL pública de la app (enlaces en WhatsApp, p. ej. asignación → detalle ?id=Nº)
+GMALLA_PUBLIC_APP_URL = os.getenv("GMALLA_PUBLIC_APP_URL", "https://taller.malla.es").strip()
+
 # API WhatsApp (Apiwhats: POST /enviar). Vacío = no se envían avisos.
-API_WHATS_URL = os.getenv("API_WHATS_URL", "").strip()
+API_WHATS_URL = os.getenv("API_WHATS_URL", "https://meta.malla.es").strip()
 API_WHATS_SECRET_TOKEN = os.getenv("API_WHATS_SECRET_TOKEN", "").strip()
 WHATSAPP_NOTIFICAR_ASIGNACION = os.getenv("WHATSAPP_NOTIFICAR_ASIGNACION", "true").lower() in (
     "1",
@@ -51,8 +54,22 @@ WHATSAPP_NOTIFICAR_ASIGNACION = os.getenv("WHATSAPP_NOTIFICAR_ASIGNACION", "true
     "yes",
     "on",
 )
-# Tras enviar WhatsApp (Apiwhats), notificar a BC (postRespuestaWhatsApp) con id_mensaje + id_incidencia
+# Tras enviar WhatsApp (Apiwhats), notificar a BC (postRespuestaWhatsApp) con id_mensaje + id_registro + id_tabla
 WHATSAPP_NOTIFICAR_BC = os.getenv("WHATSAPP_NOTIFICAR_BC", "true").lower() in (
+    "1",
+    "true",
+    "yes",
+    "on",
+)
+
+# Aviso masivo Taller: espaciar envíos y variar texto ligeramente (reduce bloqueos Meta por spam)
+try:
+    WHATSAPP_TALLER_INTERVALO_SEG = max(
+        0.0, float(os.getenv("WHATSAPP_TALLER_INTERVALO_SEG", "3"))
+    )
+except ValueError:
+    WHATSAPP_TALLER_INTERVALO_SEG = 3.0
+WHATSAPP_TALLER_VARIAR_TEXTO = os.getenv("WHATSAPP_TALLER_VARIAR_TEXTO", "true").lower() in (
     "1",
     "true",
     "yes",
