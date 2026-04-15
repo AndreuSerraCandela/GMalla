@@ -18,8 +18,248 @@ let estado = {
 let vistaListaEstado = {
     filtro: '',
     sortCol: 'fecha',
-    sortDir: -1 // -1 desc, 1 asc
+    sortDir: -1, // -1 desc, 1 asc
+    /** Filtro tipo Excel por columna: clave data-sort → Set de valores mostrados permitidos; ausente/null = sin filtro en esa columna. */
+    columnFilters: {}
 };
+
+const VISTA_LISTA_SORT_COLS = ['no', 'fecha', 'descripcion', 'tipo', 'subtipo', 'comunicado_emt', 'recurso', 'usuario_creador', 'usuario'];
+
+/** Incidencias visibles por reglas del panel (sin filtro texto ni autofiltros de tabla). */
+function getVistaListaBaseIncidencias() {
+    return (estado.incidencias || []).filter(inc => debeMostrarIncidencia(inc));
+}
+
+function formatFechaListaIncidencia(inc) {
+    let fechaStr = '-';
+    if (inc.fecha_hora) {
+        try {
+            const d = new Date(inc.fecha_hora);
+            fechaStr = d.toLocaleString('es-ES', { dateStyle: 'short', timeStyle: 'short' });
+        } catch (e) {
+            if (inc.fecha) {
+                fechaStr = typeof inc.fecha === 'string' ? inc.fecha : (inc.fecha.toISOString ? inc.fecha.toISOString().split('T')[0] : '-');
+            }
+        }
+    } else if (inc.fecha) {
+        if (typeof inc.fecha === 'string') fechaStr = inc.fecha;
+        else if (inc.fecha.toISOString) fechaStr = inc.fecha.toISOString().split('T')[0];
+    }
+    return fechaStr;
+}
+
+/** Valor de celda alineado con la vista lista (para autofiltro y filtrado). */
+function getVistaListaColumnDisplayValue(inc, col) {
+    if (col === 'no') return String(inc.no || inc.id_gtask || '');
+    if (col === 'fecha') return formatFechaListaIncidencia(inc);
+    if (col === 'descripcion') {
+        const raw = inc.descripcion || '-';
+        return raw.length <= 120 ? raw : raw.substring(0, 120) + '...';
+    }
+    if (col === 'tipo') return inc.tipo_incidencia || '-';
+    if (col === 'subtipo') return inc.subtipo_incidencia || '-';
+    if (col === 'comunicado_emt') return inc.comunicado_por_emt ? 'Sí' : 'No';
+    if (col === 'recurso') return formatearRecursoDisplay(inc);
+    if (col === 'usuario_creador') return obtenerNombreUsuario(inc.usuario_creador) || '';
+    if (col === 'usuario') return obtenerNombreUsuario(inc.usuario) || '';
+    return '';
+}
+
+function aplicarFiltrosColumnaVistaLista(incidencias) {
+    const cf = vistaListaEstado.columnFilters;
+    if (!cf) return incidencias;
+    return incidencias.filter(inc => {
+        for (const col of VISTA_LISTA_SORT_COLS) {
+            const allowed = cf[col];
+            if (allowed == null) continue;
+            const v = getVistaListaColumnDisplayValue(inc, col);
+            if (!allowed.has(v)) return false;
+        }
+        return true;
+    });
+}
+
+let vistaListaColFilterPanelCol = null;
+let vistaListaColFilterPanelSelection = null;
+
+function ensureVistaListaColFilterPanel() {
+    let panel = document.getElementById('vista-lista-col-filter-panel');
+    if (panel) return panel;
+    panel = document.createElement('div');
+    panel.id = 'vista-lista-col-filter-panel';
+    panel.className = 'vista-lista-col-filter-panel';
+    panel.hidden = true;
+    panel.innerHTML = `
+        <div class="vista-lista-col-filter-panel-inner">
+            <div class="vista-lista-col-filter-title" id="vista-lista-col-filter-title"></div>
+            <input type="search" class="vista-lista-col-filter-search" id="vista-lista-col-filter-search" placeholder="Buscar valores…" autocomplete="off">
+            <div class="vista-lista-col-filter-list" id="vista-lista-col-filter-list"></div>
+            <div class="vista-lista-col-filter-actions-row">
+                <button type="button" class="vista-lista-col-filter-mini" id="vista-lista-col-filter-sel-todo">Todo</button>
+                <button type="button" class="vista-lista-col-filter-mini" id="vista-lista-col-filter-sel-ninguno">Nada</button>
+                <button type="button" class="vista-lista-col-filter-mini" id="vista-lista-col-filter-limpiar">Limpiar</button>
+            </div>
+            <div class="vista-lista-col-filter-footer">
+                <button type="button" class="vista-lista-col-filter-btn-aplicar" id="vista-lista-col-filter-aplicar">Aplicar</button>
+                <button type="button" class="vista-lista-col-filter-btn-cancelar" id="vista-lista-col-filter-cancelar">Cancelar</button>
+            </div>
+        </div>`;
+    document.body.appendChild(panel);
+    panel.querySelector('#vista-lista-col-filter-search').addEventListener('input', () => refrescarListaCheckboxesVistaListaColFilter());
+    panel.querySelector('#vista-lista-col-filter-sel-todo').addEventListener('click', () => {
+        const base = getVistaListaBaseIncidencias();
+        const col = vistaListaColFilterPanelCol;
+        if (!col) return;
+        const allVals = [...new Set(base.map(inc => getVistaListaColumnDisplayValue(inc, col)))].sort((a, b) => String(a).localeCompare(String(b), 'es', { sensitivity: 'base' }));
+        vistaListaColFilterPanelSelection = new Set(allVals);
+        refrescarListaCheckboxesVistaListaColFilter();
+    });
+    panel.querySelector('#vista-lista-col-filter-sel-ninguno').addEventListener('click', () => {
+        vistaListaColFilterPanelSelection = new Set();
+        refrescarListaCheckboxesVistaListaColFilter();
+    });
+    panel.querySelector('#vista-lista-col-filter-limpiar').addEventListener('click', () => {
+        const col = vistaListaColFilterPanelCol;
+        if (col && vistaListaEstado.columnFilters) delete vistaListaEstado.columnFilters[col];
+        cerrarVistaListaColFilterPanel();
+        generarVistaLista();
+    });
+    panel.querySelector('#vista-lista-col-filter-aplicar').addEventListener('click', () => aplicarVistaListaColFilterDesdePanel());
+    panel.querySelector('#vista-lista-col-filter-cancelar').addEventListener('click', () => cerrarVistaListaColFilterPanel());
+    return panel;
+}
+
+function cerrarVistaListaColFilterPanel() {
+    const panel = document.getElementById('vista-lista-col-filter-panel');
+    if (panel) {
+        panel.hidden = true;
+        panel.style.left = '';
+        panel.style.top = '';
+    }
+    vistaListaColFilterPanelCol = null;
+    vistaListaColFilterPanelSelection = null;
+}
+
+function vistaListaColFilterKeydown(e) {
+    if (e.key === 'Escape') cerrarVistaListaColFilterPanel();
+}
+
+function refrescarListaCheckboxesVistaListaColFilter() {
+    const panel = document.getElementById('vista-lista-col-filter-panel');
+    const listEl = document.getElementById('vista-lista-col-filter-list');
+    const searchEl = document.getElementById('vista-lista-col-filter-search');
+    if (!panel || !listEl || !vistaListaColFilterPanelCol || !vistaListaColFilterPanelSelection) return;
+    const col = vistaListaColFilterPanelCol;
+    const q = (searchEl && searchEl.value) ? searchEl.value.trim().toLowerCase() : '';
+    const base = getVistaListaBaseIncidencias();
+    const allVals = [...new Set(base.map(inc => getVistaListaColumnDisplayValue(inc, col)))].sort((a, b) => String(a).localeCompare(String(b), 'es', { sensitivity: 'base' }));
+    listEl.innerHTML = '';
+    const sel = vistaListaColFilterPanelSelection;
+    for (const val of allVals) {
+        if (q && !String(val).toLowerCase().includes(q)) continue;
+        const label = document.createElement('label');
+        label.className = 'vista-lista-col-filter-item';
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.checked = sel.has(val);
+        cb.addEventListener('change', () => {
+            if (cb.checked) sel.add(val);
+            else sel.delete(val);
+        });
+        const span = document.createElement('span');
+        span.textContent = val === '' ? '(vacío)' : val;
+        label.appendChild(cb);
+        label.appendChild(span);
+        listEl.appendChild(label);
+    }
+}
+
+function aplicarVistaListaColFilterDesdePanel() {
+    const col = vistaListaColFilterPanelCol;
+    if (!col || !vistaListaColFilterPanelSelection) {
+        cerrarVistaListaColFilterPanel();
+        return;
+    }
+    const base = getVistaListaBaseIncidencias();
+    const allVals = new Set(base.map(inc => getVistaListaColumnDisplayValue(inc, col)));
+    const sel = vistaListaColFilterPanelSelection;
+    if (!vistaListaEstado.columnFilters) vistaListaEstado.columnFilters = {};
+    if (allVals.size === 0 || sel.size === allVals.size) {
+        delete vistaListaEstado.columnFilters[col];
+    } else {
+        vistaListaEstado.columnFilters[col] = new Set(sel);
+    }
+    cerrarVistaListaColFilterPanel();
+    generarVistaLista();
+}
+
+function abrirVistaListaColFilterPanel(col, anchorBtn) {
+    if (!VISTA_LISTA_SORT_COLS.includes(col)) return;
+    const panel = ensureVistaListaColFilterPanel();
+    const base = getVistaListaBaseIncidencias();
+    const allVals = [...new Set(base.map(inc => getVistaListaColumnDisplayValue(inc, col)))].sort((a, b) => String(a).localeCompare(String(b), 'es', { sensitivity: 'base' }));
+    const allSet = new Set(allVals);
+    const prev = vistaListaEstado.columnFilters && vistaListaEstado.columnFilters[col];
+    if (prev == null) {
+        vistaListaColFilterPanelSelection = new Set(allVals);
+    } else {
+        vistaListaColFilterPanelSelection = new Set([...prev].filter(v => allSet.has(v)));
+    }
+    vistaListaColFilterPanelCol = col;
+    const titleEl = document.getElementById('vista-lista-col-filter-title');
+    const searchEl = document.getElementById('vista-lista-col-filter-search');
+    if (titleEl) titleEl.textContent = 'Filtrar: ' + (anchorBtn && anchorBtn.getAttribute('aria-label') ? anchorBtn.getAttribute('aria-label').replace(/^Filtrar columna /, '') : col);
+    if (searchEl) searchEl.value = '';
+    panel.hidden = false;
+    refrescarListaCheckboxesVistaListaColFilter();
+    const r = anchorBtn.getBoundingClientRect();
+    const pw = panel.offsetWidth || 280;
+    let left = r.left;
+    if (left + pw > window.innerWidth - 8) left = Math.max(8, window.innerWidth - pw - 8);
+    panel.style.left = left + 'px';
+    panel.style.top = (r.bottom + 4) + 'px';
+}
+
+function actualizarIndicadoresAutofiltroVistaLista() {
+    const base = getVistaListaBaseIncidencias();
+    document.querySelectorAll('.vista-lista-filter-btn').forEach(btn => {
+        const col = btn.getAttribute('data-col');
+        if (!col) return;
+        const allVals = new Set(base.map(inc => getVistaListaColumnDisplayValue(inc, col)));
+        const f = vistaListaEstado.columnFilters && vistaListaEstado.columnFilters[col];
+        const activo = f != null && (f.size < allVals.size || f.size === 0);
+        btn.classList.toggle('vista-lista-filter-btn-active', activo);
+    });
+}
+
+function initVistaListaAutofiltros() {
+    const tabla = document.getElementById('vista-lista-tabla');
+    if (!tabla || tabla.dataset.autofilterInited) return;
+    tabla.dataset.autofilterInited = '1';
+    tabla.querySelector('thead')?.addEventListener('click', (e) => {
+        const btn = e.target.closest('.vista-lista-filter-btn');
+        if (!btn) return;
+        e.preventDefault();
+        e.stopPropagation();
+        const col = btn.getAttribute('data-col');
+        const panel = document.getElementById('vista-lista-col-filter-panel');
+        if (panel && !panel.hidden && vistaListaColFilterPanelCol === col) {
+            cerrarVistaListaColFilterPanel();
+            return;
+        }
+        abrirVistaListaColFilterPanel(col, btn);
+    }, true);
+    if (!document.body.dataset.vistaListaColFilterDocClose) {
+        document.body.dataset.vistaListaColFilterDocClose = '1';
+        document.addEventListener('click', (e) => {
+            const p = document.getElementById('vista-lista-col-filter-panel');
+            if (!p || p.hidden) return;
+            if (e.target.closest('#vista-lista-col-filter-panel') || e.target.closest('.vista-lista-filter-btn')) return;
+            cerrarVistaListaColFilterPanel();
+        }, true);
+        document.addEventListener('keydown', vistaListaColFilterKeydown, true);
+    }
+}
 
 /** Valor interno para incidencias sin subtipo (filtros y permisos). */
 const SUBTIPO_FILTRO_SIN_VALOR = '__sin_subtipo__';
@@ -1546,7 +1786,8 @@ function generarVistaLista() {
     if (!tbody) return;
     if (inputFiltro) vistaListaEstado.filtro = inputFiltro.value.trim().toLowerCase();
     tbody.innerHTML = '';
-    let incidencias = (estado.incidencias || []).filter(inc => debeMostrarIncidencia(inc));
+    let incidencias = getVistaListaBaseIncidencias();
+    incidencias = aplicarFiltrosColumnaVistaLista(incidencias);
     // Aplicar filtro de texto (busca en no, descripción, tipo, recurso, dirección, usuario)
     if (vistaListaEstado.filtro) {
         const q = vistaListaEstado.filtro;
@@ -1612,25 +1853,18 @@ function generarVistaLista() {
     });
     if (incidencias.length === 0) {
         const tr = document.createElement('tr');
-        const msgFiltro = vistaListaEstado.filtro ? 'No hay coincidencias con el filtro.' : 'No hay incidencias que mostrar. Usa "Refrescar" para cargar datos.';
+        const hayFiltroCols = vistaListaEstado.columnFilters && VISTA_LISTA_SORT_COLS.some(c => vistaListaEstado.columnFilters[c] != null);
+        const msgFiltro = (vistaListaEstado.filtro || hayFiltroCols)
+            ? 'No hay coincidencias con los filtros aplicados.'
+            : 'No hay incidencias que mostrar. Usa "Refrescar" para cargar datos.';
         tr.innerHTML = '<td colspan="10" class="vista-lista-empty">' + msgFiltro + '</td>';
         tbody.appendChild(tr);
+        actualizarIndicadoresAutofiltroVistaLista();
         return;
     }
     incidencias.forEach(inc => {
         const tr = document.createElement('tr');
-        let fechaStr = '-';
-        if (inc.fecha_hora) {
-            try {
-                const d = new Date(inc.fecha_hora);
-                fechaStr = d.toLocaleString('es-ES', { dateStyle: 'short', timeStyle: 'short' });
-            } catch (e) {
-                if (inc.fecha) fechaStr = inc.fecha;
-            }
-        } else if (inc.fecha) {
-            if (typeof inc.fecha === 'string') fechaStr = inc.fecha;
-            else if (inc.fecha.toISOString) fechaStr = inc.fecha.toISOString().split('T')[0];
-        }
+        const fechaStr = formatFechaListaIncidencia(inc);
         const descripcion = (inc.descripcion || '-').substring(0, 120) + ((inc.descripcion && inc.descripcion.length > 120) ? '...' : '');
         const recurso = formatearRecursoDisplay(inc);
         const tipoIncidencia = inc.tipo_incidencia || '-';
@@ -1677,10 +1911,12 @@ function generarVistaLista() {
         });
         tbody.appendChild(tr);
     });
+    actualizarIndicadoresAutofiltroVistaLista();
 }
 
 // Inicializar filtro y ordenación de la vista lista (llamar al cargar la página y al mostrar vista lista)
 function initVistaListaFiltroYOrden() {
+    initVistaListaAutofiltros();
     const inputFiltro = document.getElementById('vista-lista-input-filtro');
     if (inputFiltro && !inputFiltro.dataset.inited) {
         inputFiltro.dataset.inited = '1';
@@ -1691,7 +1927,8 @@ function initVistaListaFiltroYOrden() {
         if (th.dataset.sortInited) return;
         th.dataset.sortInited = '1';
         th.style.cursor = 'pointer';
-        th.addEventListener('click', () => {
+        th.addEventListener('click', (e) => {
+            if (e.target.closest('.vista-lista-filter-btn')) return;
             const col = th.getAttribute('data-sort');
             if (col === vistaListaEstado.sortCol) vistaListaEstado.sortDir = -vistaListaEstado.sortDir;
             else { vistaListaEstado.sortCol = col; vistaListaEstado.sortDir = 1; }

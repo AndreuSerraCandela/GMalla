@@ -231,15 +231,60 @@
                 <table class="vista-lista-tabla" id="vista-lista-tabla">
                     <thead>
                         <tr>
-                            <th scope="col" class="vista-lista-th sortable" data-sort="no">Nº <span class="sort-icon"></span></th>
-                            <th scope="col" class="sortable" data-sort="fecha">Fecha <span class="sort-icon"></span></th>
-                            <th scope="col" class="sortable" data-sort="descripcion">Descripción <span class="sort-icon"></span></th>
-                            <th scope="col" class="sortable" data-sort="tipo">Tipo incidencia <span class="sort-icon"></span></th>
-                            <th scope="col" class="sortable" data-sort="subtipo">Subtipo incidencia <span class="sort-icon"></span></th>
-                            <th scope="col" class="sortable" data-sort="comunicado_emt">Comunicado por EMT <span class="sort-icon"></span></th>
-                            <th scope="col" class="sortable" data-sort="recurso">Recurso / Parada <span class="sort-icon"></span></th>
-                            <th scope="col" class="sortable" data-sort="usuario_creador">Creado por <span class="sort-icon"></span></th>
-                            <th scope="col" class="sortable" data-sort="usuario">Usuario asignado <span class="sort-icon"></span></th>
+                            <th scope="col" class="vista-lista-th sortable" data-sort="no">
+                                <div class="vista-lista-th-wrap">
+                                    <span class="vista-lista-th-label">Nº <span class="sort-icon"></span></span>
+                                    <button type="button" class="vista-lista-filter-btn" data-col="no" title="Autofiltro" aria-label="Filtrar columna Nº">▾</button>
+                                </div>
+                            </th>
+                            <th scope="col" class="sortable" data-sort="fecha">
+                                <div class="vista-lista-th-wrap">
+                                    <span class="vista-lista-th-label">Fecha <span class="sort-icon"></span></span>
+                                    <button type="button" class="vista-lista-filter-btn" data-col="fecha" title="Autofiltro" aria-label="Filtrar columna Fecha">▾</button>
+                                </div>
+                            </th>
+                            <th scope="col" class="sortable" data-sort="descripcion">
+                                <div class="vista-lista-th-wrap">
+                                    <span class="vista-lista-th-label">Descripción <span class="sort-icon"></span></span>
+                                    <button type="button" class="vista-lista-filter-btn" data-col="descripcion" title="Autofiltro" aria-label="Filtrar columna Descripción">▾</button>
+                                </div>
+                            </th>
+                            <th scope="col" class="sortable" data-sort="tipo">
+                                <div class="vista-lista-th-wrap">
+                                    <span class="vista-lista-th-label">Tipo incidencia <span class="sort-icon"></span></span>
+                                    <button type="button" class="vista-lista-filter-btn" data-col="tipo" title="Autofiltro" aria-label="Filtrar columna Tipo">▾</button>
+                                </div>
+                            </th>
+                            <th scope="col" class="sortable" data-sort="subtipo">
+                                <div class="vista-lista-th-wrap">
+                                    <span class="vista-lista-th-label">Subtipo incidencia <span class="sort-icon"></span></span>
+                                    <button type="button" class="vista-lista-filter-btn" data-col="subtipo" title="Autofiltro" aria-label="Filtrar columna Subtipo">▾</button>
+                                </div>
+                            </th>
+                            <th scope="col" class="sortable" data-sort="comunicado_emt">
+                                <div class="vista-lista-th-wrap">
+                                    <span class="vista-lista-th-label">Comunicado por EMT <span class="sort-icon"></span></span>
+                                    <button type="button" class="vista-lista-filter-btn" data-col="comunicado_emt" title="Autofiltro" aria-label="Filtrar columna Comunicado por EMT">▾</button>
+                                </div>
+                            </th>
+                            <th scope="col" class="sortable" data-sort="recurso">
+                                <div class="vista-lista-th-wrap">
+                                    <span class="vista-lista-th-label">Recurso / Parada <span class="sort-icon"></span></span>
+                                    <button type="button" class="vista-lista-filter-btn" data-col="recurso" title="Autofiltro" aria-label="Filtrar columna Recurso">▾</button>
+                                </div>
+                            </th>
+                            <th scope="col" class="sortable" data-sort="usuario_creador">
+                                <div class="vista-lista-th-wrap">
+                                    <span class="vista-lista-th-label">Creado por <span class="sort-icon"></span></span>
+                                    <button type="button" class="vista-lista-filter-btn" data-col="usuario_creador" title="Autofiltro" aria-label="Filtrar columna Creado por">▾</button>
+                                </div>
+                            </th>
+                            <th scope="col" class="sortable" data-sort="usuario">
+                                <div class="vista-lista-th-wrap">
+                                    <span class="vista-lista-th-label">Usuario asignado <span class="sort-icon"></span></span>
+                                    <button type="button" class="vista-lista-filter-btn" data-col="usuario" title="Autofiltro" aria-label="Filtrar columna Usuario asignado">▾</button>
+                                </div>
+                            </th>
                             <th scope="col" class="col-acciones">Acciones</th>
                         </tr>
                     </thead>
