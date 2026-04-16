@@ -60,8 +60,8 @@ function getVistaListaColumnDisplayValue(inc, col) {
     if (col === 'subtipo') return inc.subtipo_incidencia || '-';
     if (col === 'comunicado_emt') return inc.comunicado_por_emt ? 'Sí' : 'No';
     if (col === 'recurso') return formatearRecursoDisplay(inc);
-    if (col === 'usuario_creador') return obtenerNombreUsuario(inc.usuario_creador) || '';
-    if (col === 'usuario') return obtenerNombreUsuario(inc.usuario) || '';
+    if (col === 'usuario_creador') return obtenerNombreUsuario(inc.usuario_creador,false) || '';
+    if (col === 'usuario') return obtenerNombreUsuario(inc.usuario,true) || '';
     return '';
 }
 
@@ -1825,8 +1825,8 @@ function generarVistaLista() {
         if (c === 'subtipo') return (inc.subtipo_incidencia || '').toLowerCase();
         if (c === 'comunicado_emt') return inc.comunicado_por_emt ? 'sí' : 'no';
         if (c === 'recurso') return (inc.resource_name || inc.recurso || '').toLowerCase();
-        if (c === 'usuario_creador') return (obtenerNombreUsuario(inc.usuario_creador) || '').toLowerCase();
-        if (c === 'usuario') return (obtenerNombreUsuario(inc.usuario) || '').toLowerCase();
+        if (c === 'usuario_creador') return (obtenerNombreUsuario(inc.usuario_creador,false) || '').toLowerCase();
+        if (c === 'usuario') return (obtenerNombreUsuario(inc.usuario,true) || '').toLowerCase();
         return '';
     };
     incidencias.sort((a, b) => {
@@ -1870,8 +1870,8 @@ function generarVistaLista() {
         const tipoIncidencia = inc.tipo_incidencia || '-';
         const subtipoIncidencia = inc.subtipo_incidencia || '-';
         const comunicadoEMT = inc.comunicado_por_emt ? 'Sí' : 'No';
-        const creadoPor = obtenerNombreUsuario(inc.usuario_creador);
-        const usuarioAsignado = obtenerNombreUsuario(inc.usuario);
+        const creadoPor = obtenerNombreUsuario(inc.usuario_creador,false);
+        const usuarioAsignado = obtenerNombreUsuario(inc.usuario,true);
         const idGtask = inc.id_gtask || inc.no;
         const noIncidencia = inc.no || idGtask;
         const p = estado.permisos || {};
@@ -2347,8 +2347,16 @@ async function abrirDetalleIncidencia(idGtask) {
 }
 
 // Obtener nombre de usuario por ID
-function obtenerNombreUsuario(userId) {
-    if (!userId) return 'N/A';
+function obtenerNombreUsuario(userId,asignado) {
+    if (!userId) {
+        if (asignado) {
+            return 'Sin asignar';
+        } else {
+            return 'N/A';
+        }
+    }
+       
+    
     
     // Buscar en la lista de usuarios cargados
     const usuario = estado.usuarios.find(u => {
@@ -2357,7 +2365,12 @@ function obtenerNombreUsuario(userId) {
     });
     
     if (usuario) {
-        return usuario.name || usuario.username || usuario.nombre || String(userId);
+        if (usuario.suranme) {
+            return usuario.name+' '+usuario.suranme;
+        } else {
+            return usuario.name;
+        }
+        
     }
     
     // Si no se encuentra, devolver el ID
@@ -2380,11 +2393,11 @@ function mostrarDetalleIncidencia(detalle) {
     }
     
     // Usuario creador (solo lectura): Id_Uduario_Gtask; en BC el nombre es "Usuario"
-    const userIdCreador = detalle.Id_Uduario_Gtask || detalle.Id_Usuario_Gtask;
-    const nombreCreador = detalle.Usuario || obtenerNombreUsuario(userIdCreador);
+    const userIdCreador = detalle.user_name;
+    const nombreCreador = obtenerNombreUsuario(userIdCreador,false);
     // Usuario asignado: ID puede venir en varios campos del detalle BC
-    const userIdAsignado = detalle.Id_Uduario_Gtask_Asignado || detalle.Id_Usuario_Gtask_Asignado || detalle.user_assigned || detalle.user;
-    const nombreUsuario = obtenerNombreUsuario(userIdAsignado);
+    const userIdAsignado = detalle.Id_Uduario_Gtask_Asignado || detalle.Id_Usuario_Gtask_Asignado || detalle.user_assigned;
+    const nombreUsuario = obtenerNombreUsuario(userIdAsignado,true);
     
     // Formatear geolocalización (puntoX es longitud, puntoY es latitud) - solo el icono
     let geolocalizacionIcono = '';
@@ -3180,7 +3193,7 @@ async function generarPDF(detalle, idGtask) {
         doc.text('Usuario:', margin, yPos);
         doc.setFont('helvetica', 'normal');
         const userId = detalle.user || detalle.user_name;
-        const nombreUsuario = obtenerNombreUsuario(userId);
+        const nombreUsuario = obtenerNombreUsuario(userId,true);
         doc.text(nombreUsuario, margin + 25, yPos);
         yPos += lineHeight + 3;
         
