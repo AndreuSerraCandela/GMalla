@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GMalla - Calendario de Mantenimiento | Grupo Malla</title>
+    <link rel="icon" type="image/png" sizes="32x32" href="{{ url_for('static', filename='images/favicon-32x32.png') }}">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" crossorigin="anonymous" referrerpolicy="no-referrer" />
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='mantenimiento.css') }}">
+</head>
+<body class="mantenimiento-page">
+    <div class="top-bar">
+        <div class="top-bar-container">
+            <div class="top-bar-links">
+                <span class="top-bar-phone"><i class="fa fa-phone"></i><a href="tel:+34971002800">+34 971 00 28 00</a></span>
+            </div>
+        </div>
+    </div>
+
+    <nav class="navbar-corporativo">
+        <div class="navbar-container">
+            <a class="navbar-brand" href="/">
+                <img src="{{ url_for('static', filename='images/logomalla.png') }}" alt="Grupo Malla" height="58" width="197">
+            </a>
+            <div class="navbar-title">
+                <h1>Calendario de mantenimiento</h1>
+            </div>
+            <div class="auth-section">
+                <a href="/" class="nav-link-calendario" title="Calendario de incidencias"><i class="fa fa-calendar"></i> Incidencias</a>
+            </div>
+        </div>
+    </nav>
+
+    <main class="mantenimiento-main">
+        <aside class="mantenimiento-sidebar">
+            <h3>Filtros</h3>
+            <label class="mto-filter-label">Vista</label>
+            <select id="filtro-categoria" class="mto-select">
+                <option value="todos">Todos</option>
+                <option value="paradas_bus">Paradas bus (Opis)</option>
+                <option value="emplazamientos">Emplazamientos (Vallas + Otros)</option>
+                <option value="vallas">Solo Vallas</option>
+                <option value="otros">Solo Otros</option>
+                <option value="recursos">Recursos</option>
+            </select>
+
+            <label class="mto-filter-label">Tipo de recurso</label>
+            <select id="filtro-tipo-recurso" class="mto-select">
+                <option value="">Todos los tipos</option>
+            </select>
+
+            <label class="mto-filter-label">Búsqueda</label>
+            <input type="search" id="filtro-texto" class="mto-input" placeholder="Código, nombre, ubicación…">
+
+            <label class="mto-filter-label mto-check">
+                <input type="checkbox" id="filtro-solo-vencidos"> Solo vencidos o hoy
+            </label>
+
+            <div class="mto-leyenda">
+                <h4>Leyenda</h4>
+                <span class="mto-leyenda-item"><i class="mto-dot opis"></i> Opis / Paradas bus</span>
+                <span class="mto-leyenda-item"><i class="mto-dot vallas"></i> Vallas</span>
+                <span class="mto-leyenda-item"><i class="mto-dot otros"></i> Otros</span>
+                <span class="mto-leyenda-item"><i class="mto-dot recursos"></i> Recursos</span>
+                <span class="mto-leyenda-item"><i class="mto-dot bajo"></i> Bajo mantenimiento</span>
+            </div>
+        </aside>
+
+        <section class="mantenimiento-content">
+            <div class="mto-toolbar">
+                <button type="button" id="mto-prev" class="mto-btn" title="Mes anterior"><i class="fa fa-chevron-left"></i></button>
+                <h2 id="mto-mes-titulo"></h2>
+                <button type="button" id="mto-next" class="mto-btn" title="Mes siguiente"><i class="fa fa-chevron-right"></i></button>
+                <button type="button" id="mto-hoy" class="mto-btn mto-btn-secondary">Hoy</button>
+                <span id="mto-contador" class="mto-contador"></span>
+            </div>
+            <div id="mto-calendario" class="mto-calendario-grid"></div>
+            <div id="mto-sin-fecha" class="mto-sin-fecha" hidden>
+                <h3>Sin fecha de próximo mantenimiento</h3>
+                <div id="mto-sin-fecha-lista" class="mto-sin-fecha-lista"></div>
+            </div>
+            <div id="mto-detalle" class="mto-detalle-panel" hidden>
+                <button type="button" id="mto-detalle-cerrar" class="mto-detalle-cerrar">&times;</button>
+                <div id="mto-detalle-body"></div>
+            </div>
+            <p id="mto-error" class="mto-error" hidden></p>
+        </section>
+    </main>
+
+    <script src="{{ url_for('static', filename='mantenimiento.js') }}"></script>
+</body>
+</html>

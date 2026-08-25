@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 # Agregar el directorio raíz al path para importaciones
 sys.path.insert(0, str(Path(__file__).parent))
 
-from business_central.client import BusinessCentralClient
+from business_central.client import BusinessCentralClient, extract_bc_error_message
 from calendario.gestor import GestorCalendario
 from models.incidencia import Incidencia, EstadoIncidencia
 from gtask.client import GTaskClient
@@ -28,8 +28,10 @@ from config import (
     LLM_BASE_URL,
     ADMINISTRADORES,
     PERMISOS_FILE,
+    MANTENIMIENTO_APP_URL,
 )
 from apiwhats_client import notificar_whatsapp_asignacion_incidencia
+import sso_auth
 
 app = Flask(__name__)
 
@@ -40,6 +42,7 @@ bc_client = BusinessCentralClient(
 )
 
 gtask_client = GTaskClient(api_url=GTASK_API_URL)
+_browser_auth_method: str | None = None
 
 # Realizar login automático con credenciales por defecto para la API
 # try:
@@ -77,6 +80,29 @@ def _permisos_default():
         "puede_modificar": True,
         "puede_asignar": True,
         "puede_imprimir": True,
+        "puede_ver_ordenes": True,
+    }
+
+
+def _incidencia_a_json(inc, nombres_recursos: dict) -> dict:
+    recurso_code = inc.recurso or ''
+    resource_name = nombres_recursos.get(recurso_code.strip(), recurso_code) if recurso_code else ''
+    return {
+        'no': inc.no,
+        'descripcion': inc.descripcion,
+        'fecha': _a_iso_fecha_o_datetime(inc.fecha),
+        'estado': inc.estado.value,
+        'recurso': inc.recurso,
+        'resource_name': resource_name or inc.recurso,
+        'tipo_incidencia': inc.tipo_incidencia,
+        'subtipo_incidencia': getattr(inc, 'subtipo_incidencia', None),
+        'usuario': inc.usuario,
+        'usuario_creador': getattr(inc, 'usuario_creador', None),
+        'comunicado_por_emt': getattr(inc, 'comunicado_por_emt', None),
+        'es_peticion': getattr(inc, 'es_peticion', False),
+        'fecha_hora': _a_iso_fecha_o_datetime(inc.fecha_hora),
+        'id_gtask': inc.id_gtask,
+        'url_primera_imagen': inc.url_primera_imagen,
     }
 
 def _load_permisos():
@@ -146,15 +172,140 @@ def get_permisos_for_user(user_id_or_username):
     return user_perm
 
 
+@app.context_processor
+def inject_mantenimiento_url():
+    return {"mantenimiento_app_url": MANTENIMIENTO_APP_URL}
+
+
 @app.route('/')
 def index():
     """Página principal con el calendario"""
-    return render_template('calendario.html')
+    return render_template(
+        'calendario.html',
+        sso_enabled=sso_auth.is_sso_enabled(),
+        sso_launch_url=sso_auth.sso_launch_url(),
+    )
+
+
+def _clave_actuacion_mantenimiento(d: dict) -> tuple:
+    """Clave para no duplicar la misma actuación emplazamiento + recursos BC."""
+    fecha = d.get('fecha_proximo_mantenimiento') or ''
+    ubic = (d.get('ubicacion') or '').strip().lower()
+    desc = (d.get('descripcion') or '').split(' -', 1)[0].strip().lower()
+    return fecha, ubic, desc
+
+
+def _fusionar_mantenimiento_emplaz_y_recursos(items_empl, items_rec):
+    """
+    Prioriza emplazamientos (p. ej. parada Opis en azul).
+    Omite recursos duplicados de la misma actuación o ligados a emplaz. Opis.
+    """
+    out = []
+    claves = set()
+    emplaz_opis = {
+        (e.no_emplazamiento or '').strip()
+        for e in items_empl
+        if (e.tipo_emplazamiento or '').lower() == 'opis' and (e.no_emplazamiento or '').strip()
+    }
+
+    for empl in items_empl:
+        d = empl.to_dict()
+        out.append(d)
+        claves.add(_clave_actuacion_mantenimiento(d))
+
+    for rec in items_rec:
+        d = rec.to_dict()
+        no_emp = (d.get('no_emplazamiento') or '').strip()
+        if no_emp and no_emp in emplaz_opis:
+            continue
+        clave = _clave_actuacion_mantenimiento(d)
+        if clave in claves:
+            continue
+        out.append(d)
+        claves.add(clave)
+
+    return out
+
+
+@app.route('/mantenimiento')
+def calendario_mantenimiento():
+    """Calendario de actuaciones de mantenimiento preventivo (emplazamientos BC)."""
+    return render_template('mantenimiento.html')
+
+
+@app.route('/api/mantenimiento-emplazamientos', methods=['GET'])
+def api_mantenimiento_emplazamientos():
+    """Actuaciones de mantenimiento (emplazamientos + recursos BC)."""
+    try:
+        desde = request.args.get('desde')
+        hasta = request.args.get('hasta')
+        filtros = {}
+        if desde:
+            filtros['desde'] = desde
+        if hasta:
+            filtros['hasta'] = hasta
+        tipo_empl = request.args.get('tipo_emplazamiento')
+        if tipo_empl:
+            filtros['tipo_emplazamiento'] = tipo_empl
+        tipo_rec = request.args.get('tipo_recurso')
+        if tipo_rec:
+            filtros['tipo_recurso'] = tipo_rec
+
+        items_empl = list(bc_client.obtener_mantenimiento_emplazamientos(filtros=filtros or None))
+        items_rec = []
+        try:
+            items_rec = list(bc_client.obtener_mantenimiento_recursos(filtros=filtros or None))
+        except Exception as rec_err:
+            logger.warning('No se pudieron cargar mantenimientos de recursos: %s', rec_err)
+        items = _fusionar_mantenimiento_emplaz_y_recursos(items_empl, items_rec)
+        categoria = (request.args.get('categoria') or '').strip().lower()
+        tipo_recurso = (request.args.get('tipo_recurso') or '').strip()
+        texto = (request.args.get('q') or '').strip().lower()
+        solo_vencidos = request.args.get('solo_vencidos', '').lower() in ('1', 'true', 'yes')
+        hoy = date.today()
+
+        out = []
+        for d in items:
+            cat = d.get('categoria', '')
+            if categoria == 'paradas_bus' and cat != 'paradas_bus':
+                continue
+            if categoria == 'emplazamientos' and cat == 'paradas_bus':
+                continue
+            if categoria == 'vallas' and cat != 'vallas':
+                continue
+            if categoria == 'otros' and cat != 'otros':
+                continue
+            if categoria == 'recursos' and cat != 'recursos':
+                continue
+            if tipo_recurso:
+                lista = d.get('tipos_recurso_lista') or []
+                if tipo_recurso not in lista and tipo_recurso not in (d.get('tipos_recurso') or ''):
+                    continue
+            if texto:
+                blob = ' '.join([
+                    d.get('no_emplazamiento', ''),
+                    d.get('descripcion', ''),
+                    d.get('ubicacion', ''),
+                    d.get('municipio', ''),
+                    d.get('zona', ''),
+                    d.get('tipos_recurso', ''),
+                ]).lower()
+                if texto not in blob:
+                    continue
+            if solo_vencidos and d.get('fecha_proximo_mantenimiento'):
+                if d['fecha_proximo_mantenimiento'] > hoy.isoformat():
+                    continue
+            out.append(d)
+
+        return jsonify({'success': True, 'items': out, 'count': len(out)})
+    except Exception as e:
+        logger.exception('api_mantenimiento_emplazamientos')
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 
 @app.route('/api/login', methods=['POST'])
 def login():
-    """API para realizar login en GTask"""
+    """API legacy para login en GTask (user/pass en modal)."""
     try:
         data = request.json
         username = data.get('username')
@@ -169,11 +320,14 @@ def login():
         resultado = gtask_client.login(username, password)
         
         if resultado['success']:
+            global _browser_auth_method
+            _browser_auth_method = "legacy"
             return jsonify({
                 'success': True,
                 'token': resultado.get('token'),
                 'user_data': resultado.get('user_data'),
-                'message': 'Login exitoso'
+                'message': 'Login exitoso',
+                'auth_method': 'legacy',
             })
         else:
             return jsonify({
@@ -188,11 +342,60 @@ def login():
         }), 500
 
 
+@app.route('/api/auth/sso/status', methods=['GET'])
+def auth_sso_status():
+    """Diagnóstico SSO (sin secretos)."""
+    return jsonify({'success': True, **sso_auth.sso_status_payload()})
+
+
+@app.route('/api/auth/sso/exchange', methods=['POST'])
+def auth_sso_exchange():
+    """Intercambia token SSO de appdesktop por sesión GTask en Taller."""
+    if not sso_auth.is_sso_enabled():
+        status = sso_auth.sso_status_payload()
+        hint = (
+            'Configure MALLA_SSO_SECRET en C:\\inetpub\\wwwroot\\GMalla\\.env '
+            '(mismo valor que appdesktop) y reinicie Taller.'
+        )
+        if not status.get('secret_configured'):
+            error = f'Login SSO no habilitado: falta MALLA_SSO_SECRET. {hint}'
+        else:
+            error = 'Login SSO no habilitado (SSO_LOGIN_ENABLED=false).'
+        return jsonify({
+            'success': False,
+            'error': error,
+            'sso_status': status,
+        }), 403
+    data = request.get_json(silent=True) or {}
+    token = (data.get('token') or '').strip()
+    try:
+        payload = sso_auth.verify_exchange_token(token)
+        username = (payload.get("gtask_username") or "").strip()
+        access_token = (payload.get("access_token") or "").strip()
+        user_data = sso_auth.build_user_data_from_sso(payload)
+        gtask_client.set_session(access_token, user_data)
+        global _browser_auth_method
+        _browser_auth_method = "sso"
+        return jsonify({
+            'success': True,
+            'token': access_token,
+            'user_data': user_data,
+            'message': 'Login SSO exitoso',
+            'auth_method': 'sso',
+        })
+    except ValueError as exc:
+        return jsonify({'success': False, 'error': str(exc)}), 401
+    except Exception as exc:
+        return jsonify({'success': False, 'error': str(exc)}), 500
+
+
 @app.route('/api/logout', methods=['POST'])
 def logout():
     """API para cerrar sesión en GTask"""
     try:
+        global _browser_auth_method
         gtask_client.logout()
+        _browser_auth_method = None
         return jsonify({
             'success': True,
             'message': 'Sesión cerrada correctamente'
@@ -212,7 +415,8 @@ def auth_status():
             'success': True,
             'authenticated': gtask_client.esta_autenticado(),
             'user_data': gtask_client.obtener_usuario_actual(),
-            'token': gtask_client.obtener_token()
+            'token': gtask_client.obtener_token(),
+            'auth_method': _browser_auth_method,
         })
     except Exception as e:
         return jsonify({
@@ -349,32 +553,13 @@ def obtener_incidencias():
             filtros['recurso'] = request.args.get('recurso')
         
         incidencias = bc_client.obtener_incidencias(filtros=filtros)
-        
-        # Resolver nombres de recursos desde ElementosMallorca
-        codigos_recurso = [inc.recurso for inc in incidencias if inc.recurso]
+        ordenes = bc_client.obtener_ordenes_trabajo(filtros=filtros)
+        todas = incidencias + ordenes
+
+        codigos_recurso = [inc.recurso for inc in todas if inc.recurso]
         nombres_recursos = _obtener_nombres_recursos(codigos_recurso)
-        
-        # Convertir incidencias a formato JSON
-        incidencias_json = []
-        for inc in incidencias:
-            recurso_code = inc.recurso or ''
-            resource_name = nombres_recursos.get(recurso_code.strip(), recurso_code) if recurso_code else ''
-            incidencias_json.append({
-                'no': inc.no,
-                'descripcion': inc.descripcion,
-                'fecha': _a_iso_fecha_o_datetime(inc.fecha),
-                'estado': inc.estado.value,
-                'recurso': inc.recurso,
-                'resource_name': resource_name or inc.recurso,
-                'tipo_incidencia': inc.tipo_incidencia,
-                'subtipo_incidencia': getattr(inc, 'subtipo_incidencia', None),
-                'usuario': inc.usuario,
-                'usuario_creador': getattr(inc, 'usuario_creador', None),
-                'comunicado_por_emt': getattr(inc, 'comunicado_por_emt', None),
-                'fecha_hora': _a_iso_fecha_o_datetime(inc.fecha_hora),
-                'id_gtask': inc.id_gtask,
-                'url_primera_imagen': inc.url_primera_imagen
-            })
+
+        incidencias_json = [_incidencia_a_json(inc, nombres_recursos) for inc in todas]
         
         return jsonify({
             'success': True,
@@ -704,18 +889,32 @@ def actualizar_incidencia():
         nuevo_recurso = data.get('recurso')
         nuevo_estado = data.get('state') or data.get('estado')
         nuevo_usuario_id = data.get('usuario_id')  # Usuario asignado (None o '' = sin asignar)
-        
+        imagenes_nuevas = data.get('imagenes') or []
+        if not isinstance(imagenes_nuevas, list):
+            imagenes_nuevas = []
+
         if not id_gtask:
             return jsonify({
                 'success': False,
                 'error': 'Falta el ID de la incidencia (id_gtask)'
             }), 400
         
-        # Buscar la incidencia (primero por id_gtask, si no por No)
-        incidencias = bc_client.obtener_incidencias()
-        incidencia = next((inc for inc in incidencias if inc.id_gtask == id_gtask), None)
+        # Buscar incidencia u orden por Id_Gtask (evita paginación OData incompleta)
+        filtros_id = {'id_gtask': id_gtask}
+        incidencias = bc_client.obtener_incidencias(filtros=filtros_id)
+        ordenes = bc_client.obtener_ordenes_trabajo(filtros=filtros_id)
+        todas = incidencias + ordenes
+        incidencia = next((inc for inc in todas if inc.id_gtask == id_gtask), None)
         if not incidencia:
-            incidencia = next((inc for inc in incidencias if str(inc.no) == str(id_gtask)), None)
+            incidencia = next((inc for inc in todas if str(inc.no) == str(id_gtask)), None)
+        if not incidencia:
+            # Fallback: listas completas (sin filtro OData de estado)
+            incidencias = bc_client.obtener_incidencias()
+            ordenes = bc_client.obtener_ordenes_trabajo()
+            todas = incidencias + ordenes
+            incidencia = next((inc for inc in todas if inc.id_gtask == id_gtask), None)
+            if not incidencia:
+                incidencia = next((inc for inc in todas if str(inc.no) == str(id_gtask)), None)
         
         if not incidencia:
             return jsonify({
@@ -760,9 +959,14 @@ def actualizar_incidencia():
         if nuevo_usuario_id is not None:
             incidencia.usuario = (nuevo_usuario_id and str(nuevo_usuario_id).strip()) or None
         
-        # Actualizar en Business Central
-        exito, error_msg = bc_client.actualizar_incidencia(incidencia)
-        
+        imagenes_validas = [
+            img for img in imagenes_nuevas
+            if isinstance(img, dict) and (img.get("file") or img.get("data"))
+        ]
+        exito, error_msg = bc_client.actualizar_incidencia(
+            incidencia, imagenes_nuevas=imagenes_validas if imagenes_validas else None
+        )
+
         if exito:
             if nuevo_usuario_id is not None:
                 nuevo = (nuevo_usuario_id and str(nuevo_usuario_id).strip()) or None
@@ -776,7 +980,7 @@ def actualizar_incidencia():
         else:
             return jsonify({
                 'success': False,
-                'error': error_msg or 'No se pudo actualizar la incidencia en Business Central'
+                'error': extract_bc_error_message(error_msg)
             }), 500
             
     except Exception as e:

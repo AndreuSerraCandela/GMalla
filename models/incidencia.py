@@ -39,6 +39,7 @@ class Incidencia:
     usuario: Optional[str] = None  # Guid - usuario asignado
     usuario_creador: Optional[str] = None  # Guid - usuario que creó/registró la incidencia
     comunicado_por_emt: Optional[bool] = None  # Comunicado por EMT (desde BC)
+    es_peticion: bool = False  # True = orden de trabajo (BC: Es Peticion)
     archivos_imagen: list[str] = field(default_factory=list)  # Archivos de imagen asociados
     url_primera_imagen: Optional[str] = None  # URL de la primera imagen para miniatura
     
@@ -60,6 +61,7 @@ class Incidencia:
             "Usuario": self.usuario,
             "UsuarioCreador": self.usuario_creador,
             "ComunicadoPorEMT": self.comunicado_por_emt,
+            "Es_Peticion": self.es_peticion,
             "ArchivosImagen": self.archivos_imagen,
             "URL_Primera_Imagen": self.url_primera_imagen
         }
@@ -107,6 +109,13 @@ class Incidencia:
         # Comunicado por EMT (BC: Comunicado_por_EMT)
         val_emt = data.get("ComunicadoPorEMT") if "ComunicadoPorEMT" in data else data.get("Comunicado_por_EMT")
         incidencia.comunicado_por_emt = bool(val_emt) if val_emt is not None else None
+        if "Es_Peticion" in data or "es_peticion" in data:
+            try:
+                from models.mantenimiento_parse import parse_bool
+            except ImportError:
+                from .mantenimiento_parse import parse_bool
+            val_pet = data.get("Es_Peticion") if "Es_Peticion" in data else data.get("es_peticion")
+            incidencia.es_peticion = parse_bool(val_pet)
         # Si hay fecha en el diccionario, usarla (ya procesada desde Fecha_Hora)
         if data.get("Fecha"):
             fecha_str = data["Fecha"]

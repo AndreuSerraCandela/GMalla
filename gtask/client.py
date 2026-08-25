@@ -309,6 +309,11 @@ class GTaskClient:
         self._auth_token = None
         self._user_data = None
         print("🚪 Sesión cerrada")
+
+    def set_session(self, token: str, user_data: dict | None = None) -> None:
+        """Establece sesión del navegador (p. ej. tras SSO del portal)."""
+        self._auth_token = (token or "").strip() or None
+        self._user_data = dict(user_data) if user_data else None
     
     def esta_autenticado(self) -> bool:
         """Verifica si hay una sesión activa"""

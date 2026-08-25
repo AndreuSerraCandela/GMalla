@@ -17,3 +17,5 @@ pyodbc>=5.0.0
 # Servidor WSGI para producción (IIS)
 waitress>=2.1.2
 
+# SSO portal Malla (JWT)
+PyJWT>=2.8.0

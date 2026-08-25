@@ -4,11 +4,39 @@ Los métodos específicos para recuperar y guardar incidencias se implementarán
 """
 import json
 import logging
+import os
+import re
+import time
+import uuid
 import requests
 from datetime import datetime
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Tuple
 
 _bc_log = logging.getLogger(__name__)
+
+
+def extract_bc_error_message(error: Any) -> str:
+    """Normaliza errores OData/BC (dict anidado o texto) a string legible."""
+    if error is None:
+        return 'Error desconocido'
+    if isinstance(error, str):
+        return error.strip() or 'Error desconocido'
+    if isinstance(error, dict):
+        # OData: { "message": { "lang": "...", "value": "texto" } }
+        for key in ('message', 'Message', 'value', 'Value', 'error', 'Error'):
+            if key in error and error[key] not in (None, ''):
+                nested = error[key]
+                if isinstance(nested, dict) and ('value' in nested or 'Value' in nested):
+                    return extract_bc_error_message(nested.get('value') or nested.get('Value'))
+                return extract_bc_error_message(nested)
+        if error.get('code') or error.get('Code'):
+            code = error.get('code') or error.get('Code')
+            return f'{code}'
+        try:
+            return json.dumps(error, ensure_ascii=False)
+        except (TypeError, ValueError):
+            return str(error)
+    return str(error)
 
 # Importar modelo de incidencia con fallback
 try:
@@ -25,9 +53,15 @@ try:
         get_bc_incidences_url,
         get_bc_detalle_incidences_url,
         get_bc_lista_incidencias_url,
+        get_bc_lista_ordenes_url,
+        get_bc_listado_mantenimiento_emplaz_url,
+        get_bc_listado_mantenimiento_recurso_url,
+        get_bc_procedure_mantenimiento_emplaz,
+        get_bc_procedure_mantenimiento_recurso,
         get_bc_post_respuesta_whatsapp_url,
         get_bc_auth_header,
         get_bc_auth_credentials,
+        get_base64_api_save_url,
         BC_CONFIG,
     )
 except ImportError:
@@ -39,11 +73,68 @@ except ImportError:
         get_bc_incidences_url,
         get_bc_detalle_incidences_url,
         get_bc_lista_incidencias_url,
+        get_bc_lista_ordenes_url,
+        get_bc_listado_mantenimiento_emplaz_url,
+        get_bc_listado_mantenimiento_recurso_url,
+        get_bc_procedure_mantenimiento_emplaz,
+        get_bc_procedure_mantenimiento_recurso,
         get_bc_post_respuesta_whatsapp_url,
         get_bc_auth_header,
         get_bc_auth_credentials,
+        get_base64_api_save_url,
         BC_CONFIG,
     )
+
+
+def convert_base64_to_url(base64_data: str, filename: str) -> Tuple[str, Optional[int]]:
+    """
+    Convierte base64 a URL usando base64-api (igual que Incidencias/web_app.py).
+    Devuelve (url, file_id).
+    """
+    file_ext = os.path.splitext(filename)[1].lower().lstrip('.') or 'jpg'
+    if file_ext == 'jpeg':
+        file_ext = 'jpg'
+    if file_ext in ('jpg', 'png', 'bmp', 'tif', 'tiff', 'gif', 'webp'):
+        base64_with_prefix = f'image/{file_ext};base64,{base64_data}'
+    else:
+        base64_with_prefix = f'application/{file_ext};base64,{base64_data}'
+
+    payload = {'base64': base64_with_prefix, 'filename': filename}
+    url = get_base64_api_save_url()
+    max_retries = 3
+    retry_delay = 5
+    last_error = None
+
+    for attempt in range(max_retries):
+        try:
+            response = requests.post(
+                url,
+                json=payload,
+                timeout=60,
+                headers={'Content-Type': 'application/json'},
+            )
+            if response.status_code == 400:
+                last_error = 'Error al guardar el archivo (400)'
+                if attempt < max_retries - 1:
+                    time.sleep(retry_delay)
+                    continue
+                raise Exception(last_error)
+            response.raise_for_status()
+            result = response.json()
+            url_result = result.get('url', '')
+            file_id = result.get('_id')
+            if not url_result:
+                raise Exception('La API de imágenes no devolvió URL')
+            print(f"✅ Imagen subida a base64-api: {url_result} (ID: {file_id})")
+            return url_result, file_id
+        except requests.exceptions.RequestException as e:
+            last_error = str(e)
+            if attempt < max_retries - 1:
+                time.sleep(retry_delay)
+            else:
+                raise Exception(f'Error al convertir base64 a URL: {last_error}') from e
+
+    raise Exception(last_error or 'Error al convertir base64 a URL')
 
 
 class BusinessCentralClient:
@@ -60,27 +151,55 @@ class BusinessCentralClient:
         self.base_url = base_url
         self.api_key = api_key
     
-    def obtener_incidencias(self, filtros: Optional[dict] = None) -> List[Incidencia]:
-        """
-        Recupera las incidencias de Business Central desde el endpoint OData
-        
-        Args:
-            filtros: Diccionario con filtros opcionales (fecha, estado, usuario, etc.)
-                    Los filtros se aplican como parámetros OData $filter
-        
-        Returns:
-            Lista de incidencias
-        """
+    @staticmethod
+    def _mapear_odata_a_incidencia(inc_data: dict, es_peticion: bool) -> Incidencia:
+        fecha = None
+        fecha_hora_str = inc_data.get("Fecha_Hora")
+        if fecha_hora_str and fecha_hora_str != "0001-01-01T00:00:00Z":
+            try:
+                if fecha_hora_str.endswith('Z'):
+                    fecha_str = fecha_hora_str.split('T')[0]
+                    fecha = datetime.fromisoformat(fecha_str).date()
+                else:
+                    fecha_hora = datetime.fromisoformat(fecha_hora_str.replace('Z', '+00:00'))
+                    fecha = fecha_hora.date()
+            except Exception as e:
+                print(f"⚠️ Error al parsear fecha {fecha_hora_str}: {str(e)}")
+
+        id_creador = inc_data.get("Id_Uduario_Gtask") or inc_data.get("Id_Usuario_Gtask")
+        if id_creador and not str(id_creador).strip():
+            id_creador = None
+        id_asignado = inc_data.get("Id_Uduario_Gtask_Asignado") or inc_data.get("Id_Usuario_Gtask_Asignado")
+        if id_asignado and not str(id_asignado).strip():
+            id_asignado = None
+        id_tarea_gtask = inc_data.get("ID_Tarea_Gtask", "")
+        if id_tarea_gtask == "":
+            id_asignado = None
+
+        incidencia_dict = {
+            "No.": inc_data.get("No", ""),
+            "Descripción": inc_data.get("Descripción", ""),
+            "Recurso": inc_data.get("Recurso", ""),
+            "Tipo Incidencia": inc_data.get("Tipo_Incidencia"),
+            "Subtipo Incidencia": inc_data.get("SubTipo_Incidencia"),
+            "Estado": inc_data.get("Estado", "Abierta"),
+            "FechaHora": fecha_hora_str,
+            "Fecha": fecha.isoformat() if fecha else None,
+            "Usuario": id_asignado,
+            "UsuarioCreador": id_creador,
+            "Id_Gtask": inc_data.get("Id_Gtask", ""),
+            "ID_Tarea_Gtask": inc_data.get("ID_Tarea_Gtask", ""),
+            "URL_Primera_Imagen": inc_data.get("URL_Primera_Imagen", ""),
+            "Comunicado_por_EMT": inc_data.get("Comunicado_por_EMT"),
+            "Es_Peticion": es_peticion,
+        }
+        return Incidencia.from_dict(incidencia_dict)
+
+    def _obtener_lista_odata(self, url: str, filtros: Optional[dict], es_peticion: bool, etiqueta_log: str) -> List[Incidencia]:
         try:
-            # URL del endpoint OData para listar incidencias
-            url = get_bc_lista_incidencias_url()
-            
-            # Construir parámetros OData si hay filtros
             params = {}
             if filtros:
                 filter_parts = []
-                
-                # Filtro por estado (varios valores: Abierta, EnProgreso, Cerrada)
                 if 'estado' in filtros:
                     est = filtros['estado']
                     if isinstance(est, (list, tuple)):
@@ -88,169 +207,126 @@ class BusinessCentralClient:
                             filter_parts.append("(" + " or ".join(f"Estado eq '{e}'" for e in est) + ")")
                     else:
                         filter_parts.append(f"Estado eq '{est}'")
-                
-                # Filtro por recurso
                 if 'recurso' in filtros:
-                    recurso = filtros['recurso']
-                    filter_parts.append(f"Recurso eq '{recurso}'")
-                
-                # Filtro por tipo de incidencia
+                    filter_parts.append(f"Recurso eq '{filtros['recurso']}'")
                 if 'tipo_incidencia' in filtros:
-                    tipo = filtros['tipo_incidencia']
-                    filter_parts.append(f"Tipo_Incidencia eq '{tipo}'")
-                
-                # Filtro por fecha (si se proporciona)
+                    filter_parts.append(f"Tipo_Incidencia eq '{filtros['tipo_incidencia']}'")
                 if 'fecha' in filtros:
                     fecha = filtros['fecha']
                     if isinstance(fecha, str):
                         filter_parts.append(f"Fecha_Hora ge {fecha}")
-                    # Puedes agregar más lógica de filtrado por fecha si es necesario
-
-                # Una fila concreta por id GTask (evita depender solo de la 1.ª página OData)
                 if filtros.get('id_gtask'):
                     gid = str(filtros['id_gtask']).strip().replace("'", "''")
                     if gid:
                         filter_parts.append(f"Id_Gtask eq '{gid}'")
-                
                 if filter_parts:
                     params['$filter'] = ' and '.join(filter_parts)
-            
-            # Headers con autenticación BC
-            headers = {
-                "Accept": "application/json",
-                "Content-Type": "application/json"
-            }
-            
-            # Agregar autenticación: priorizar API Key, sino usar autenticación básica
+
+            headers = {"Accept": "application/json", "Content-Type": "application/json"}
             auth_header = get_bc_auth_header()
+            auth_credentials = None if auth_header else get_bc_auth_credentials()
             if auth_header:
                 headers["Authorization"] = auth_header
-                auth_credentials = None
-            else:
-                # Usar autenticación básica HTTP (username/password)
-                auth_credentials = get_bc_auth_credentials()
-            
-            # Obtener timeout de la configuración
             timeout = BC_CONFIG.get('timeout', 120)
-            
-            print("=== Obteniendo incidencias desde Business Central ===")
+
+            print(f"=== Obteniendo {etiqueta_log} desde Business Central ===")
             print(f"URL: {url}")
             if params:
                 print(f"Filtros: {params}")
-            print("=====================================================")
-            
-            # Realizar la petición GET a BC
-            response = requests.get(
-                url,
-                params=params,
-                headers=headers,
-                auth=auth_credentials,  # Autenticación básica si no hay API Key
-                timeout=timeout
-            )
-            
-            # Verificar si la petición fue exitosa
-            if response.status_code == 200:
-                try:
-                    data = response.json()
-                    
-                    # OData devuelve los datos en el campo "value"
-                    incidencias_data = data.get('value', [])
-                    
-                    # Convertir cada incidencia del formato OData al modelo Incidencia
-                    incidencias = []
-                    for inc_data in incidencias_data:
-                        # Extraer fecha de Fecha_Hora si está disponible
-                        fecha = None
-                        fecha_hora_str = inc_data.get("Fecha_Hora")
-                        if fecha_hora_str and fecha_hora_str != "0001-01-01T00:00:00Z":
-                            try:
-                                # Parsear la fecha-hora manteniendo la fecha original sin conversión de zona horaria
-                                # Si termina en Z, es UTC, pero queremos usar la fecha tal cual está
-                                if fecha_hora_str.endswith('Z'):
-                                    # Extraer solo la parte de fecha sin convertir zona horaria
-                                    fecha_str = fecha_hora_str.split('T')[0]
-                                    fecha = datetime.fromisoformat(fecha_str).date()
-                                else:
-                                    fecha_hora = datetime.fromisoformat(fecha_hora_str.replace('Z', '+00:00'))
-                                    fecha = fecha_hora.date()
-                            except Exception as e:
-                                print(f"⚠️ Error al parsear fecha {fecha_hora_str}: {str(e)}")
-                                pass
-                        
-                        # Mapear campos de OData al modelo
-                        # Usuario creador: Id_Uduario_Gtask (nombre en BC: Usuario)
-                        # Usuario asignado: Id_Uduario_Gtask_Asignado (nombre en BC: Usuario Asignado)
-                        id_creador = inc_data.get("Id_Uduario_Gtask") or inc_data.get("Id_Usuario_Gtask")
-                        if id_creador and not str(id_creador).strip():
-                            id_creador = None
-                        id_asignado = inc_data.get("Id_Uduario_Gtask_Asignado") or inc_data.get("Id_Usuario_Gtask_Asignado")
-                        if id_asignado and not str(id_asignado).strip():
-                            id_asignado = None
-                        id_tarea_gtask = inc_data.get("ID_Tarea_Gtask", "")
-                        if id_tarea_gtask == "":
-                            id_asignado = None  # Sin usuario asignado si no hay tarea GTask
-                        incidencia_dict = {
-                            "No.": inc_data.get("No", ""),
-                            "Descripción": inc_data.get("Descripción", ""),
-                            "Recurso": inc_data.get("Recurso", ""),
-                            "Tipo Incidencia": inc_data.get("Tipo_Incidencia"),
-                            "Subtipo Incidencia": inc_data.get("SubTipo_Incidencia"),
-                            "Estado": inc_data.get("Estado", "Abierta"),
-                            "FechaHora": fecha_hora_str,
-                            "Fecha": fecha.isoformat() if fecha else None,
-                            "Usuario": id_asignado,  # Id_Uduario_Gtask_Asignado - usuario asignado
-                            "UsuarioCreador": id_creador,  # Id_Uduario_Gtask - usuario creador
-                            "Id_Gtask": inc_data.get("Id_Gtask", ""),
-                            "ID_Tarea_Gtask": inc_data.get("ID_Tarea_Gtask", ""),
-                            "URL_Primera_Imagen": inc_data.get("URL_Primera_Imagen", ""),
-                            "Comunicado_por_EMT": inc_data.get("Comunicado_por_EMT")
-                        }
-                        
-                        # Crear objeto Incidencia desde el diccionario
-                        incidencia = Incidencia.from_dict(incidencia_dict)
-                        incidencias.append(incidencia)
-                    
-                    print(f"✅ {len(incidencias)} incidencias obtenidas desde BC")
-                    return incidencias
-                    
-                except json.JSONDecodeError as e:
-                    error_msg = f'Error al decodificar respuesta JSON: {str(e)}'
-                    print(f"❌ {error_msg}")
-                    print(f"❌ Respuesta: {response.text[:500]}")
-                    return []
-                except Exception as e:
-                    import traceback
-                    error_trace = traceback.format_exc()
-                    error_msg = f'Error al procesar incidencias: {str(e)}'
-                    print(f"❌ {error_msg}")
-                    print(f"📋 Traceback:\n{error_trace}")
-                    return []
-            else:
-                print(f"❌ Error al obtener incidencias de BC. Código: {response.status_code}")
-                print(f"❌ Respuesta completa: {response.text}")
-                print(f"❌ URL que falló: {url}")
+            print("=" * 55)
+
+            response = requests.get(url, params=params, headers=headers, auth=auth_credentials, timeout=timeout)
+            if response.status_code != 200:
+                print(f"❌ Error al obtener {etiqueta_log}. Código: {response.status_code}")
+                print(f"❌ Respuesta: {response.text[:500]}")
+                print(f"❌ URL: {url}")
                 return []
-                
+
+            data = response.json()
+            rows = data.get('value', [])
+            items = [self._mapear_odata_a_incidencia(row, es_peticion) for row in rows if isinstance(row, dict)]
+            print(f"✅ {len(items)} {etiqueta_log} obtenidos desde BC")
+            return items
         except requests.exceptions.RequestException as e:
-            error_msg = f'Error de conexión con Business Central: {str(e)}'
-            print("=" * 50)
-            print("❌❌❌ ERROR DE CONEXIÓN CON BC ❌❌❌")
-            print(f"❌ Error: {error_msg}")
-            print("=" * 50)
+            print(f"❌ Error de conexión BC ({etiqueta_log}): {e}")
             return []
-            
         except Exception as e:
             import traceback
-            error_trace = traceback.format_exc()
-            error_msg = f'Error interno al obtener incidencias: {str(e)}'
-            print("=" * 50)
-            print("❌❌❌ ERROR INTERNO EN obtener_incidencias() ❌❌❌")
-            print(f"❌ Error: {error_msg}")
-            print(f"📋 Traceback completo:\n{error_trace}")
-            print("=" * 50)
+            print(f"❌ Error interno ({etiqueta_log}): {e}\n{traceback.format_exc()}")
             return []
+
+    def obtener_incidencias(self, filtros: Optional[dict] = None) -> List[Incidencia]:
+        """Lista incidencias (Es Peticion = false en BC / endpoint ListaIncidencias)."""
+        return self._obtener_lista_odata(
+            get_bc_lista_incidencias_url(), filtros, es_peticion=False, etiqueta_log="incidencias"
+        )
+
+    def obtener_ordenes_trabajo(self, filtros: Optional[dict] = None) -> List[Incidencia]:
+        """Órdenes de trabajo (Es Peticion = true / endpoint ListaOrdenes)."""
+        return self._obtener_lista_odata(
+            get_bc_lista_ordenes_url(), filtros, es_peticion=True, etiqueta_log="órdenes de trabajo"
+        )
     
-    def actualizar_incidencia(self, incidencia: Incidencia) -> tuple:
+    @staticmethod
+    def _extraer_base64_imagen(file_val: str) -> str:
+        """Base64 puro (sin prefijo data:image/...;base64,)."""
+        val = (file_val or "").strip()
+        if val.startswith("data:") and "," in val:
+            val = val.split(",", 1)[1]
+        elif "base64," in val:
+            val = val.split("base64,", 1)[1]
+        return val.strip()
+
+    @staticmethod
+    def _nombre_archivo_imagen_bc(nombre: Optional[str], indice: int) -> str:
+        """Nombre único para FormBase64ToUrl (BC omite imágenes si la URL ya existe)."""
+        base = (nombre or "").strip()
+        if not base:
+            base = f"gmalla_{uuid.uuid4().hex}.jpg"
+        if not base.lower().endswith((".jpg", ".jpeg", ".png", ".gif", ".webp")):
+            base = f"{base}.jpg"
+        base = re.sub(r'[^\w.\-]', '_', base)
+        if indice > 0 and '.' in base:
+            stem, ext = base.rsplit('.', 1)
+            base = f"{stem}_{indice}.{ext}"
+        return base[:200]
+
+    @staticmethod
+    def _prepare_bc_image_documents(imagenes_nuevas: Optional[List[dict]]) -> Tuple[List[dict], Optional[str]]:
+        """
+        Igual que Incidencias send_incidence_to_server_with_session:
+        base64 → convert_base64_to_url → BC recibe URL + file_id.
+        """
+        out = []
+        for idx, img in enumerate(imagenes_nuevas or []):
+            if not isinstance(img, dict):
+                continue
+            file_raw = (img.get("file") or img.get("data") or "").strip()
+            if not file_raw:
+                continue
+            name = BusinessCentralClient._nombre_archivo_imagen_bc(img.get("name"), idx)
+            file_id = img.get("file_id")
+
+            try:
+                if file_raw.startswith(("http://", "https://")):
+                    url_imagen = file_raw
+                else:
+                    base64_data = BusinessCentralClient._extraer_base64_imagen(file_raw)
+                    if not base64_data:
+                        continue
+                    url_imagen, file_id = convert_base64_to_url(base64_data, name)
+            except Exception as e:
+                return [], f"Error al subir imagen «{name}»: {e}"
+
+            doc: Dict[str, Any] = {"file": url_imagen, "name": name}
+            if file_id not in (None, "", 0):
+                doc["file_id"] = file_id
+            out.append({"document": doc})
+        return out, None
+
+    def actualizar_incidencia(
+        self, incidencia: Incidencia, imagenes_nuevas: Optional[List[dict]] = None
+    ) -> tuple:
         """
         Actualiza una incidencia existente en Business Central.
         Se envían fecha, estado, recurso, descripción, user (creador, no se cambia) y user_assigned (usuario asignado).
@@ -328,19 +404,24 @@ class BusinessCentralClient:
             # Si no hay Id_Gtask, usar No como fallback
             id_gtask = incidencia.id_gtask or incidencia.no
             
+            image_documents, img_error = self._prepare_bc_image_documents(imagenes_nuevas)
+            if img_error:
+                return (False, img_error)
+
             # user = usuario creador (Id_Uduario_Gtask), no se cambia al actualizar
             # user_assigned = usuario asignado (Id_Uduario_Gtask_Asignado), es el que se asigna al guardar
             bc_incidence_data = {
                 "_id": id_gtask,
                 "state": estado_bc,
                 "incidenceType": incidencia.tipo_incidencia or "",
+                "subIncidenceType": incidencia.subtipo_incidencia or "",
                 "observation": "",
                 "description": descripcion_limpia,
                 "resource": incidencia.recurso or "",
                 "user": incidencia.usuario_creador or "",  # Creador (Id_Uduario_Gtask), no se modifica
                 "user_assigned": incidencia.usuario or "",  # Usuario asignado (Id_Uduario_Gtask_Asignado)
                 "fechahora": fecha_hora_str,
-                "image": [],
+                "image": image_documents,
                 "audio": []
             }
             
@@ -368,9 +449,11 @@ class BusinessCentralClient:
                 # Usar autenticación básica HTTP (username/password)
                 auth_credentials = get_bc_auth_credentials()
             
-            # Obtener timeout de la configuración
+            num_imagenes = len(bc_incidence_data.get("image") or [])
             timeout = BC_CONFIG.get('timeout', 120)
-            
+            if num_imagenes > 0:
+                timeout = BC_CONFIG.get('timeout_large_images', 300)
+
             print("=== Enviando actualización de incidencia a Business Central ===")
             print(f"URL: {url}")
             print(f"Params: {params}")
@@ -378,6 +461,7 @@ class BusinessCentralClient:
             print(f"Id_Gtask: {incidencia.id_gtask}")
             print(f"Recurso: {incidencia.recurso}")
             print(f"Fecha: {fecha_str}")
+            print(f"Imágenes nuevas: {num_imagenes}")
             print(f"Timeout: {timeout}s")
             print("==============================================================")
             
@@ -397,10 +481,10 @@ class BusinessCentralClient:
                 try:
                     data = response.json()
                     if isinstance(data, dict) and data.get("error"):
-                        error_msg = data.get("error", "Error desconocido")
+                        error_msg = extract_bc_error_message(data.get("error"))
                         print(f"❌ API devolvió 200 pero con error en el cuerpo: {error_msg}")
                         print(f"❌ Respuesta: {response.text}")
-                        return (False, str(error_msg))
+                        return (False, error_msg)
                 except (ValueError, TypeError):
                     pass  # No es JSON o no tiene la estructura esperada
                 print(f"✅ Incidencia actualizada correctamente en BC: {response.text}")
@@ -410,7 +494,7 @@ class BusinessCentralClient:
                 try:
                     data = response.json()
                     if isinstance(data, dict) and data.get("error"):
-                        error_msg = data.get("error")
+                        error_msg = extract_bc_error_message(data.get("error"))
                 except (ValueError, TypeError):
                     pass
                 print(f"❌ Error al actualizar incidencia en BC. Código: {response.status_code}")
@@ -636,4 +720,127 @@ class BusinessCentralClient:
         except Exception as e:
             print(f"❌ BC postRespuestaWhatsApp: {e}")
             return False, str(e)
+
+    def _parse_bc_codeunit_json_value(self, response: requests.Response) -> Any:
+        """Extrae y parsea el campo OData «value» (string JSON) de una codeunit BC."""
+        respuesta = response.json()
+        if isinstance(respuesta, dict) and respuesta.get("error"):
+            raise RuntimeError(str(respuesta.get("error")))
+        if isinstance(respuesta, dict) and "value" in respuesta:
+            raw = respuesta["value"]
+            if isinstance(raw, str):
+                raw = raw.replace("\r\n", " ").replace("\n", " ").strip()
+                return json.loads(raw)
+            return raw
+        return respuesta
+
+    @staticmethod
+    def _extraer_filas_mantenimiento_bc(data: Any) -> List[dict]:
+        """Normaliza distintos formatos JSON devueltos por codeunits de mantenimiento."""
+        if isinstance(data, list):
+            return [r for r in data if isinstance(r, dict)]
+        if not isinstance(data, dict):
+            return []
+        candidatos = [
+            data.get("value"),
+            data.get("Value"),
+            data.get("items"),
+            data.get("Items"),
+            data.get("lista"),
+            data.get("Lista"),
+        ]
+        for cand in candidatos:
+            if isinstance(cand, list):
+                return [r for r in cand if isinstance(r, dict)]
+            if isinstance(cand, dict):
+                inner = cand.get("value") or cand.get("Value")
+                if isinstance(inner, list):
+                    return [r for r in inner if isinstance(r, dict)]
+        return []
+
+    def _llamar_listado_mantenimiento_bc(
+        self,
+        *,
+        url: str,
+        procedure: str,
+        filtros: Optional[dict],
+        etiqueta: str,
+    ) -> List[dict]:
+        payload: Dict[str, Any] = {}
+        if filtros:
+            if filtros.get("desde"):
+                payload["desde"] = filtros["desde"]
+            if filtros.get("hasta"):
+                payload["hasta"] = filtros["hasta"]
+            if filtros.get("tipo_emplazamiento"):
+                payload["tipoEmplazamiento"] = filtros["tipo_emplazamiento"]
+            if filtros.get("tipo_recurso"):
+                payload["tipoRecurso"] = filtros["tipo_recurso"]
+
+        params = {
+            "company": BC_CONFIG["company"],
+            "procedure": procedure,
+        }
+        body = {"jsonText": json.dumps(payload, ensure_ascii=False)}
+
+        headers = {"Content-Type": "application/json", "Accept": "application/json"}
+        auth_header = get_bc_auth_header()
+        auth_credentials = None if auth_header else get_bc_auth_credentials()
+        if auth_header:
+            headers["Authorization"] = auth_header
+
+        timeout = BC_CONFIG.get("timeout", 120)
+        response = requests.post(
+            url,
+            params=params,
+            headers=headers,
+            data=json.dumps(body),
+            auth=auth_credentials,
+            timeout=timeout,
+        )
+        if response.status_code not in (200, 201):
+            raise RuntimeError(
+                f"BC {etiqueta} HTTP {response.status_code}: {response.text[:500]}"
+            )
+
+        data = self._parse_bc_codeunit_json_value(response)
+        return self._extraer_filas_mantenimiento_bc(data)
+
+    def obtener_mantenimiento_emplazamientos(
+        self, filtros: Optional[dict] = None
+    ) -> List:
+        """
+        Listado de mantenimiento vía codeunit GTask (ListadoMantenimientoEmplaz).
+        """
+        try:
+            from ..models.emplazamiento_mantenimiento import EmplazamientoMantenimiento
+        except ImportError:
+            from models.emplazamiento_mantenimiento import EmplazamientoMantenimiento
+
+        rows = self._llamar_listado_mantenimiento_bc(
+            url=get_bc_listado_mantenimiento_emplaz_url(),
+            procedure=get_bc_procedure_mantenimiento_emplaz(),
+            filtros=filtros,
+            etiqueta="ListadoMantenimientoEmplaz",
+        )
+        return [EmplazamientoMantenimiento.desde_odata(row) for row in rows]
+
+    def obtener_mantenimiento_recursos(
+        self, filtros: Optional[dict] = None
+    ) -> List:
+        """
+        Listado de mantenimiento de recursos vía codeunit GTask (ListadoMantenimientoRecurso).
+        """
+        try:
+            from ..models.recurso_mantenimiento import RecursoMantenimiento
+        except ImportError:
+            from models.recurso_mantenimiento import RecursoMantenimiento
+
+        rows = self._llamar_listado_mantenimiento_bc(
+            url=get_bc_listado_mantenimiento_recurso_url(),
+            procedure=get_bc_procedure_mantenimiento_recurso(),
+            filtros=filtros,
+            etiqueta="ListadoMantenimientoRecurso",
+        )
+        return [RecursoMantenimiento.desde_odata(row) for row in rows]
 

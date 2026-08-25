@@ -39,11 +39,25 @@ ADMINISTRADORES = {s.strip().lower() for s in _ADMINISTRADORES_STR.split(",") if
 # Fichero donde se guardan los permisos por usuario
 PERMISOS_FILE = BASE_DIR / "permisos.json"
 
+# Servicio de imágenes (mismo que app Incidencias / FormBase64ToUrl en BC)
+BASE64_API_SAVE_URL = os.getenv(
+    "BASE64_API_SAVE_URL",
+    "https://base64-api.deploy.malla.es/save",
+).strip()
+
 # Configuración de LLM local
 LLM_BASE_URL = os.getenv("LLM_BASE_URL", "http://192.168.10.238:1234")
 
 # URL pública de la app (enlaces en WhatsApp, p. ej. asignación → detalle ?id=Nº)
 GMALLA_PUBLIC_APP_URL = os.getenv("GMALLA_PUBLIC_APP_URL", "https://taller.malla.es").strip()
+
+# SSO desde portal Malla (mismo MALLA_SSO_SECRET que apps.malla.es)
+MALLA_SSO_SECRET = (os.getenv("MALLA_SSO_SECRET") or "").strip()
+SSO_LOGIN_ENABLED = os.getenv("SSO_LOGIN_ENABLED", "true").lower() in ("1", "true", "yes")
+APPDESKTOP_URL = (os.getenv("APPDESKTOP_URL") or "https://apps.malla.es").strip().rstrip("/")
+
+# App dedicada de mantenimiento (botón «Mantenimiento» en el calendario de incidencias)
+MANTENIMIENTO_APP_URL = os.getenv("MANTENIMIENTO_APP_URL", "http://127.0.0.1:5021").strip().rstrip("/")
 
 # API WhatsApp (Apiwhats: POST /enviar). Vacío = no se envían avisos.
 API_WHATS_URL = os.getenv("API_WHATS_URL", "https://meta.malla.es").strip()
@@ -105,6 +119,11 @@ def get_bc_url() -> str:
     return BC_CONFIG.get('base_url', BUSINESS_CENTRAL_BASE_URL)
 
 
+def get_base64_api_save_url() -> str:
+    """URL POST para guardar base64 → url + _id (app Incidencias)."""
+    return BASE64_API_SAVE_URL
+
+
 def get_bc_incidences_url() -> str:
     """
     Obtiene la URL del endpoint de incidencias en Business Central.
@@ -142,6 +161,49 @@ def get_bc_post_respuesta_whatsapp_url() -> str:
     return f"{base_url}{endpoint}"
 
 
+def get_bc_listado_mantenimiento_emplaz_url() -> str:
+    """
+    OData codeunit GTask (7001148): procedimiento ListadoMantenimientoEmplaz.
+    Mismo patrón que GtaskMalla_DetalleIncidencia (publicar en BC si aún no está).
+    """
+    base_url = get_bc_url().rstrip("/")
+    endpoint = os.getenv(
+        "BUSINESS_CENTRAL_ENDPOINT_LISTADO_MANTENIMIENTO",
+        "/powerbi/ODataV4/GtaskMalla_ListadoMantenimientoEmplaz",
+    )
+    if not endpoint.startswith("/"):
+        endpoint = "/" + endpoint
+    return f"{base_url}{endpoint}"
+
+
+def get_bc_listado_mantenimiento_recurso_url() -> str:
+    """
+    Misma publicación OData que emplazamientos , procedure distinto.
+    Solo definir BUSINESS_CENTRAL_ENDPOINT_LISTADO_MANTENIMIENTO_RECURSO si BC publica otro servicio.
+    """
+    dedicated = os.getenv("BUSINESS_CENTRAL_ENDPOINT_LISTADO_MANTENIMIENTO_RECURSO", "").strip()
+    if dedicated:
+        base_url = get_bc_url().rstrip("/")
+        if not dedicated.startswith("/"):
+            dedicated = "/" + dedicated
+        return f"{base_url}{dedicated}"
+    return get_bc_listado_mantenimiento_emplaz_url()
+
+
+def get_bc_procedure_mantenimiento_emplaz() -> str:
+    return os.getenv(
+        "BUSINESS_CENTRAL_PROCEDURE_MANTENIMIENTO_EMPLAZ",
+        "ListadoMantenimientoEmplaz",
+    )
+
+
+def get_bc_procedure_mantenimiento_recurso() -> str:
+    return os.getenv(
+        "BUSINESS_CENTRAL_PROCEDURE_MANTENIMIENTO_RECURSO",
+        "ListadoMantenimientoRecurso",
+    )
+
+
 def get_bc_lista_incidencias_url() -> str:
     """
     Obtiene la URL del endpoint OData para listar incidencias en Business Central.
@@ -149,10 +211,30 @@ def get_bc_lista_incidencias_url() -> str:
     """
     base_url = get_bc_url().rstrip('/')
     company = BC_CONFIG.get('company', BUSINESS_CENTRAL_COMPANY)
-    # Codificar el nombre de la empresa para URL (espacios como %20)
     company_encoded = company.replace(' ', '%20')
-    lista_url = f"{base_url}/powerbi/ODataV4/Company('{company_encoded}')/ListaIncidencias"
-    return lista_url
+    endpoint = os.getenv(
+        "BUSINESS_CENTRAL_ENDPOINT_LISTA_INCIDENCIAS",
+        "/powerbi/ODataV4/Company('{company}')/ListaIncidencias",
+    ).format(company=company_encoded)
+    if not endpoint.startswith("/"):
+        endpoint = "/" + endpoint
+    return f"{base_url}{endpoint}"
+
+
+def get_bc_lista_ordenes_url() -> str:
+    """
+    OData para órdenes de trabajo (misma tabla Incidencias, Es Peticion = true).
+  """
+    base_url = get_bc_url().rstrip('/')
+    company = BC_CONFIG.get('company', BUSINESS_CENTRAL_COMPANY)
+    company_encoded = company.replace(' ', '%20')
+    endpoint = os.getenv(
+        "BUSINESS_CENTRAL_ENDPOINT_LISTA_ORDENES",
+        "/powerbi/ODataV4/Company('{company}')/ListaOrdenes",
+    ).format(company=company_encoded)
+    if not endpoint.startswith("/"):
+        endpoint = "/" + endpoint
+    return f"{base_url}{endpoint}"
 
 
 def get_bc_auth_header() -> str:

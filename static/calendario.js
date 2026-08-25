@@ -1,4 +1,71 @@
-// Estado de la aplicación
+const SSO_CONFIG = (() => {
+    try {
+        const el = document.getElementById('sso-config-json');
+        return el ? JSON.parse(el.textContent || '{}') : {};
+    } catch (e) {
+        return {};
+    }
+})();
+
+function getAuthRequestHeaders() {
+    return { 'Content-Type': 'application/json' };
+}
+
+async function completarLoginUsuario(data, { cerrarModalLogin = true } = {}) {
+    estado.autenticado = true;
+    estado.usuarioActual = data.user_data;
+    actualizarUIAutenticacion();
+    await cargarPermisos();
+    if (cerrarModalLogin) {
+        cerrarModal();
+    }
+    cargarDatos();
+}
+
+async function procesarSsoTokenDesdeUrl() {
+    const params = new URLSearchParams(window.location.search);
+    const token = params.get('sso_token');
+    if (!token) return false;
+    params.delete('sso_token');
+    const qs = params.toString();
+    const cleanUrl = window.location.pathname + (qs ? `?${qs}` : '');
+    window.history.replaceState({}, '', cleanUrl);
+    try {
+        const response = await fetch('/api/auth/sso/exchange', {
+            method: 'POST',
+            headers: getAuthRequestHeaders(),
+            credentials: 'same-origin',
+            body: JSON.stringify({ token }),
+        });
+        const data = await response.json();
+        if (!data.success) {
+            const errorDiv = document.getElementById('login-error');
+            const msg = data.error || 'No se pudo completar el acceso Malla';
+            if (errorDiv) {
+                errorDiv.textContent = msg;
+                errorDiv.style.display = 'block';
+            }
+            mostrarLogin();
+            return true;
+        }
+        await completarLoginUsuario(data);
+        console.log('✅ Login SSO exitoso');
+        return true;
+    } catch (error) {
+        console.error('Error SSO:', error);
+        return false;
+    }
+}
+
+function iniciarLoginSsoMalla() {
+    const url = (SSO_CONFIG && SSO_CONFIG.launch_url) || '';
+    if (!url) {
+        alert('Login Malla no configurado');
+        return;
+    }
+    window.location.href = url;
+}
+
 let estado = {
     fechaInicioSemana: null,
     usuarios: [],
@@ -7,7 +74,7 @@ let estado = {
     autenticado: false,
     usuarioActual: null,
     usuariosFiltrados: null, // null = todos, Set de IDs = usuarios filtrados
-    permisos: null,  // { tipos_incidencia_visible, subtipos_incidencia_visible, comunicado_por_emt_visible, puede_modificar, puede_asignar, puede_imprimir }
+    permisos: null,  // { tipos_incidencia_visible, subtipos_incidencia_visible, comunicado_por_emt_visible, puede_modificar, puede_asignar, puede_imprimir, puede_ver_ordenes }
     isAdmin: false,
     miniCalendarioMes: null,
     miniCalendarioAño: null,
@@ -24,6 +91,21 @@ let vistaListaEstado = {
 };
 
 const VISTA_LISTA_SORT_COLS = ['no', 'fecha', 'descripcion', 'tipo', 'subtipo', 'comunicado_emt', 'recurso', 'usuario_creador', 'usuario'];
+
+/** Convierte valores heterogéneos (bool/string/num) a booleano real. */
+function esOrdenTrabajo(incidencia) {
+    return parseBooleanLike(incidencia && incidencia.es_peticion);
+}
+
+function parseBooleanLike(value) {
+    if (value === true) return true;
+    if (value === false || value == null) return false;
+    if (typeof value === 'number') return value !== 0;
+    const normalized = String(value).trim().toLowerCase();
+    if (['true', '1', 'si', 'sí', 'yes', 'y', 'on'].includes(normalized)) return true;
+    if (['false', '0', 'no', 'n', 'off', ''].includes(normalized)) return false;
+    return false;
+}
 
 /** Incidencias visibles por reglas del panel (sin filtro texto ni autofiltros de tabla). */
 function getVistaListaBaseIncidencias() {
@@ -58,7 +140,7 @@ function getVistaListaColumnDisplayValue(inc, col) {
     }
     if (col === 'tipo') return inc.tipo_incidencia || '-';
     if (col === 'subtipo') return inc.subtipo_incidencia || '-';
-    if (col === 'comunicado_emt') return inc.comunicado_por_emt ? 'Sí' : 'No';
+    if (col === 'comunicado_emt') return parseBooleanLike(inc.comunicado_por_emt) ? 'Sí' : 'No';
     if (col === 'recurso') return formatearRecursoDisplay(inc);
     if (col === 'usuario_creador') return obtenerNombreUsuario(inc.usuario_creador,false) || '';
     if (col === 'usuario') return obtenerNombreUsuario(inc.usuario,true) || '';
@@ -265,7 +347,7 @@ function initVistaListaAutofiltros() {
 const SUBTIPO_FILTRO_SIN_VALOR = '__sin_subtipo__';
 
 // Inicialización
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
     // Inicializar con la semana actual usando UTC
     const hoy = new Date();
     const año = hoy.getUTCFullYear();
@@ -283,8 +365,14 @@ document.addEventListener('DOMContentLoaded', () => {
     estado.miniCalendarioMes = mes;
     estado.miniCalendarioAño = año;
     
-    // Verificar estado de autenticación
-    verificarAutenticacion();
+    // Verificar autenticación (SSO desde portal o sesión existente)
+    const ssoHandled = await procesarSsoTokenDesdeUrl();
+    if (!ssoHandled) {
+        verificarAutenticacion();
+    }
+    
+    const btnSsoMalla = document.getElementById('btnSsoMalla');
+    if (btnSsoMalla) btnSsoMalla.addEventListener('click', iniciarLoginSsoMalla);
     
     // Event listeners
     document.getElementById('refrescar-btn').addEventListener('click', cargarDatos);
@@ -323,6 +411,10 @@ document.addEventListener('DOMContentLoaded', () => {
             cb.addEventListener('change', cargarIncidencias);
         });
     }
+    ['filtro-mostrar-incidencias', 'filtro-mostrar-ordenes'].forEach(id => {
+        const cb = document.getElementById(id);
+        if (cb) cb.addEventListener('change', actualizarVista);
+    });
     // Filtro de usuarios
     document.getElementById('filtro-usuarios-btn').addEventListener('click', toggleFiltroPanel);
     document.getElementById('cerrar-filtro-btn').addEventListener('click', cerrarFiltroPanel);
@@ -446,11 +538,11 @@ async function cargarPermisos() {
             estado.permisos = data.permisos || {};
             estado.isAdmin = !!data.is_admin;
         } else {
-            estado.permisos = { comunicado_por_emt_visible: true, puede_modificar: true, puede_asignar: true, puede_imprimir: true, tipos_incidencia_visible: null, subtipos_incidencia_visible: null };
+            estado.permisos = { comunicado_por_emt_visible: true, puede_modificar: true, puede_asignar: true, puede_imprimir: true, puede_ver_ordenes: true, tipos_incidencia_visible: null, subtipos_incidencia_visible: null };
             estado.isAdmin = false;
         }
     } catch (e) {
-        estado.permisos = { comunicado_por_emt_visible: true, puede_modificar: true, puede_asignar: true, puede_imprimir: true, tipos_incidencia_visible: null, subtipos_incidencia_visible: null };
+        estado.permisos = { comunicado_por_emt_visible: true, puede_modificar: true, puede_asignar: true, puede_imprimir: true, puede_ver_ordenes: true, tipos_incidencia_visible: null, subtipos_incidencia_visible: null };
         estado.isAdmin = false;
     }
     actualizarUIAutenticacion();
@@ -466,6 +558,8 @@ function aplicarPermisosUI() {
     const reasignarAutoBtn = document.getElementById('reasignar-automatico-btn');
     if (asignarAutoBtn) asignarAutoBtn.style.display = (p.puede_asignar !== false) ? '' : 'none';
     if (reasignarAutoBtn) reasignarAutoBtn.style.display = (p.puede_asignar !== false) ? '' : 'none';
+    const sectionOrdenes = document.getElementById('filtro-ordenes-section');
+    if (sectionOrdenes) sectionOrdenes.style.display = (p.puede_ver_ordenes !== false) ? '' : 'none';
     // Tipos de incidencia y botones modificar/imprimir se aplican al generar vistas
 }
 
@@ -536,6 +630,7 @@ async function cargarPermisosAdmin() {
                     <label><input type="checkbox" data-key="${escapeHtml(key)}" data-opt="puede_modificar" ${(p.puede_modificar !== false) ? 'checked' : ''}> Modificar incidencias</label>
                     <label><input type="checkbox" data-key="${escapeHtml(key)}" data-opt="puede_asignar" ${(p.puede_asignar !== false) ? 'checked' : ''}> Asignar incidencias</label>
                     <label><input type="checkbox" data-key="${escapeHtml(key)}" data-opt="puede_imprimir" ${(p.puede_imprimir !== false) ? 'checked' : ''}> Imprimir incidencias</label>
+                    <label><input type="checkbox" data-key="${escapeHtml(key)}" data-opt="puede_ver_ordenes" ${(p.puede_ver_ordenes !== false) ? 'checked' : ''}> Ver órdenes de trabajo</label>
                     <div class="permisos-tipos"><label>Tipos visibles (todos marcados = todos):</label>${tiposCheckboxes}</div>
                     <div class="permisos-tipos"><label>Subtipos visibles (todos marcados = todos):</label>${subtiposCheckboxes}</div>
                 </div>
@@ -568,6 +663,7 @@ async function guardarPermisos() {
             puede_modificar: !!div.querySelector('input[data-opt="puede_modificar"]')?.checked,
             puede_asignar: !!div.querySelector('input[data-opt="puede_asignar"]')?.checked,
             puede_imprimir: !!div.querySelector('input[data-opt="puede_imprimir"]')?.checked,
+            puede_ver_ordenes: !!div.querySelector('input[data-opt="puede_ver_ordenes"]')?.checked,
             tipos_incidencia_visible: (tiposIncidencia.length === 0 || todosMarcados) ? null : tiposChecked,
             subtipos_incidencia_visible: (subtiposIncidencia.length === 0 || todosSubMarcados) ? null : subtiposChecked
         };
@@ -659,12 +755,7 @@ async function realizarLogin(e) {
         const data = await response.json();
         
         if (data.success) {
-            estado.autenticado = true;
-            estado.usuarioActual = data.user_data;
-            actualizarUIAutenticacion();
-            await cargarPermisos();
-            cerrarModal();
-            cargarDatos(); // Recargar datos con autenticación
+            await completarLoginUsuario(data);
         } else {
             errorDiv.textContent = data.error || 'Error en el login';
             errorDiv.style.display = 'block';
@@ -1380,6 +1471,16 @@ function generarCalendario() {
 
 // Función para verificar si una incidencia debe mostrarse según los filtros
 function debeMostrarIncidencia(incidencia) {
+    const esOrden = esOrdenTrabajo(incidencia);
+    if (esOrden && estado.permisos && estado.permisos.puede_ver_ordenes === false) return false;
+
+    const cbInc = document.getElementById('filtro-mostrar-incidencias');
+    const cbOrd = document.getElementById('filtro-mostrar-ordenes');
+    if (cbInc && cbOrd) {
+        if (esOrden && !cbOrd.checked) return false;
+        if (!esOrden && !cbInc.checked) return false;
+    }
+
     // Permisos: si el usuario tiene tipos_incidencia_visible definido, solo mostrar esos tipos
     const tiposPermitidos = estado.permisos && estado.permisos.tipos_incidencia_visible;
     if (Array.isArray(tiposPermitidos) && tiposPermitidos.length > 0) {
@@ -1400,7 +1501,7 @@ function debeMostrarIncidencia(incidencia) {
         if (cbSi && cbNo) {
             const soloSi = cbSi.checked && !cbNo.checked;
             const soloNo = cbNo.checked && !cbSi.checked;
-            const valorEMT = incidencia.comunicado_por_emt === true;
+            const valorEMT = parseBooleanLike(incidencia.comunicado_por_emt);
             if (soloSi && !valorEMT) return false;
             if (soloNo && valorEMT) return false;
         }
@@ -1579,6 +1680,7 @@ function crearElementoIncidencia(incidencia, usuarioId, fecha) {
     } else {
         div.className = `incidencia ${tipoClase}`;
     }
+    if (esOrdenTrabajo(incidencia)) div.classList.add('es-orden-trabajo');
     
     div.draggable = true;
     div.dataset.no = incidencia.no;
@@ -1616,7 +1718,7 @@ function crearElementoIncidencia(incidencia, usuarioId, fecha) {
         div.innerHTML = `
             <div class="incidencia-simple-box">
                 <div class="incidencia-simple-header">
-                    <span class="incidencia-simple-no">${incidencia.no}</span>
+                    <span class="incidencia-simple-no">${esOrdenTrabajo(incidencia) ? '<span class="badge-orden" title="Orden de trabajo">OT</span> ' : ''}${incidencia.no}</span>
                     <span class="incidencia-simple-recurso">${recurso}</span>
                     <span class="incidencia-editar" data-id-gtask="${incidencia.id_gtask || incidencia.no}" title="Ver detalle">✎</span>
                 </div>
@@ -1644,7 +1746,7 @@ function crearElementoIncidencia(incidencia, usuarioId, fecha) {
         
         div.innerHTML = `
             <div class="incidencia-header">
-                <span class="incidencia-no-header">${incidencia.no}</span>
+                <span class="incidencia-no-header">${esOrdenTrabajo(incidencia) ? '<span class="badge-orden" title="Orden de trabajo">OT</span> ' : ''}${incidencia.no}</span>
                 <span class="incidencia-editar" data-id-gtask="${incidencia.id_gtask || incidencia.no}" title="Ver detalle">
                     ✏️
                 </span>
@@ -1807,7 +1909,7 @@ function generarVistaLista() {
             const userNombre = nombreUsuario(inc.usuario).toLowerCase();
             const creador = (inc.usuario_creador || '').toLowerCase();
             const creadorNombre = nombreUsuario(inc.usuario_creador).toLowerCase();
-            const comunicadoEMT = (inc.comunicado_por_emt ? 'sí' : 'no');
+            const comunicadoEMT = (parseBooleanLike(inc.comunicado_por_emt) ? 'sí' : 'no');
             return no.includes(q) || desc.includes(q) || tipo.includes(q) || subtipo.includes(q)
                 || recursoNombre.includes(q) || recursoNum.includes(q)
                 || dir.includes(q) || user.includes(q) || userNombre.includes(q) || creador.includes(q) || creadorNombre.includes(q)
@@ -1823,7 +1925,7 @@ function generarVistaLista() {
         if (c === 'descripcion') return (inc.descripcion || '').toLowerCase();
         if (c === 'tipo') return (inc.tipo_incidencia || '').toLowerCase();
         if (c === 'subtipo') return (inc.subtipo_incidencia || '').toLowerCase();
-        if (c === 'comunicado_emt') return inc.comunicado_por_emt ? 'sí' : 'no';
+        if (c === 'comunicado_emt') return parseBooleanLike(inc.comunicado_por_emt) ? 'sí' : 'no';
         if (c === 'recurso') return (inc.resource_name || inc.recurso || '').toLowerCase();
         if (c === 'usuario_creador') return (obtenerNombreUsuario(inc.usuario_creador,false) || '').toLowerCase();
         if (c === 'usuario') return (obtenerNombreUsuario(inc.usuario,true) || '').toLowerCase();
@@ -1869,11 +1971,11 @@ function generarVistaLista() {
         const recurso = formatearRecursoDisplay(inc);
         const tipoIncidencia = inc.tipo_incidencia || '-';
         const subtipoIncidencia = inc.subtipo_incidencia || '-';
-        const comunicadoEMT = inc.comunicado_por_emt ? 'Sí' : 'No';
+        const comunicadoEMT = parseBooleanLike(inc.comunicado_por_emt) ? 'Sí' : 'No';
         const creadoPor = obtenerNombreUsuario(inc.usuario_creador,false);
         const usuarioAsignado = obtenerNombreUsuario(inc.usuario,true);
         const idGtask = inc.id_gtask || inc.no;
-        const noIncidencia = inc.no || idGtask;
+        const noIncidencia = (esOrdenTrabajo(inc) ? 'OT ' : '') + (inc.no || idGtask);
         const p = estado.permisos || {};
         const puedeModificar = p.puede_modificar !== false;
         const puedeImprimir = p.puede_imprimir !== false;
@@ -2302,6 +2404,8 @@ function mostrarIncidenciasLibres() {
 // Variable global para almacenar el detalle actual y el id_gtask
 let detalleActual = null;
 let idGtaskActual = null;
+/** Imágenes nuevas pendientes de enviar a BC al guardar ({ name, file }) */
+let imagenesPendientesDetalle = [];
 /** Estado pendiente de guardar (ej. 'Cerrada') cuando el usuario pulsa "Cerrar incidencia" */
 let estadoPendienteGuardar = null;
 
@@ -2313,8 +2417,8 @@ async function abrirDetalleIncidencia(idGtask) {
     const modal = document.getElementById('detalle-modal');
     const contenido = document.getElementById('detalle-contenido');
     
-    // Guardar el id_gtask actual
     idGtaskActual = idGtask;
+    imagenesPendientesDetalle = [];
     
     // Mostrar modal con loading
     contenido.innerHTML = '<div class="loading">Cargando detalle de la incidencia...</div>';
@@ -2380,6 +2484,12 @@ function obtenerNombreUsuario(userId,asignado) {
 // Mostrar detalle de incidencia en el modal
 function mostrarDetalleIncidencia(detalle) {
     const contenido = document.getElementById('detalle-contenido');
+    const modalTitle = document.querySelector('#detalle-modal .modal-header h2');
+    const incCache = estado.incidencias.find(i => String(i.id_gtask || i.no) === String(idGtaskActual));
+    const esOrden = parseBooleanLike(detalle.Es_Peticion ?? detalle.es_peticion) || (incCache && esOrdenTrabajo(incCache));
+    if (modalTitle) {
+        modalTitle.textContent = esOrden ? '📋 Detalle de Orden de trabajo' : '📋 Detalle de Incidencia';
+    }
     
     // Formatear fecha
     let fechaHTML = '';
@@ -2414,41 +2524,50 @@ function mostrarDetalleIncidencia(detalle) {
         }
     }
     
-    // Formatear imágenes
-    let imagenesHTML = '';
+    const permDetalle = estado.permisos || {};
+    const puedeModificarDetalle = permDetalle.puede_modificar !== false;
+    let galeriaExistenteHTML = '';
     if (detalle.image && Array.isArray(detalle.image) && detalle.image.length > 0) {
-        imagenesHTML = '<div class="detalle-imagenes"><h3>Imágenes:</h3><div class="galeria-imagenes">';
         detalle.image.forEach((img, index) => {
             if (img.url) {
-                // Obtener rotación guardada o usar la rotación por defecto
                 const rotacionGuardada = rotacionesImagenes[img.url] || 0;
                 const esVertical = esImagenVertical(img.url);
                 const rotacionInicial = esVertical ? 90 : 0;
                 const rotacionTotal = (rotacionInicial + rotacionGuardada) % 360;
-                
-                // Clase CSS para la rotación visual
                 let claseRotacion = '';
                 if (rotacionTotal === 90 || rotacionTotal === 270) {
                     claseRotacion = 'imagen-vertical-rotada';
                 }
                 const claseContenedor = (rotacionTotal === 90 || rotacionTotal === 270) ? 'imagen-item-vertical' : '';
-                
-                // Estilo inline para la rotación exacta
                 const estiloRotacion = `transform: rotate(${rotacionTotal}deg);`;
-                
-                imagenesHTML += `
-                    <div class="imagen-item ${claseContenedor}" data-image-url="${img.url}" data-image-index="${index}">
-                        <div class="imagen-rotar-btn" onclick="rotarImagen('${img.url}', event)" title="Rotar imagen 90°">🔄</div>
-                        <img src="${img.url}" alt="${img.name || 'Imagen'}" 
+                const urlAttr = escapeHtml(img.url);
+                const urlJs = String(img.url).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+                galeriaExistenteHTML += `
+                    <div class="imagen-item ${claseContenedor}" data-image-url="${urlAttr}" data-image-index="${index}">
+                        <div class="imagen-rotar-btn" onclick="rotarImagen('${urlJs}', event)" title="Rotar imagen 90°">🔄</div>
+                        <img src="${urlAttr}" alt="${escapeHtml(img.name || 'Imagen')}" 
                              class="${claseRotacion}" 
                              style="${estiloRotacion}"
-                             onclick="abrirImagenGrande('${img.url}')">
+                             onclick="abrirImagenGrande('${urlJs}')">
                     </div>
                 `;
             }
         });
-        imagenesHTML += '</div></div>';
     }
+    const imagenesHTML = `
+        <div class="detalle-imagenes">
+            <div class="detalle-imagenes-toolbar">
+                <h3>Imágenes</h3>
+                ${puedeModificarDetalle ? `
+                    <button type="button" id="btn-anadir-imagenes-detalle" class="btn-anadir-imagenes" title="Añadir imágenes (se envían al guardar)">📷 Añadir imágenes</button>
+                    <input type="file" id="input-imagenes-detalle" accept="image/jpeg,image/png,image/webp,image/gif" multiple hidden>
+                ` : ''}
+            </div>
+            ${galeriaExistenteHTML ? `<div class="galeria-imagenes">${galeriaExistenteHTML}</div>` : '<p class="detalle-imagenes-vacio">Sin imágenes en BC.</p>'}
+            <div id="galeria-imagenes-pendientes" class="galeria-imagenes galeria-imagenes-pendientes"></div>
+            ${puedeModificarDetalle ? '<p class="detalle-imagenes-ayuda">Las imágenes nuevas se suben a Business Central al pulsar «Guardar Cambios».</p>' : ''}
+        </div>
+    `;
     
     // Preparar fecha/hora para el input datetime-local
     let fechaHoraInput = '';
@@ -2527,7 +2646,7 @@ function mostrarDetalleIncidencia(detalle) {
                 </div>
                 <div class="detalle-campo" style="flex: 1;">
                     <label>Comunicado por EMT:</label>
-                    <p class="detalle-campo-solo-lectura">${(detalle.Comunicado_por_EMT || detalle.comunicado_por_emt) ? 'Sí' : 'No'}</p>
+                    <p class="detalle-campo-solo-lectura">${parseBooleanLike(detalle.Comunicado_por_EMT ?? detalle.comunicado_por_emt) ? 'Sí' : 'No'}</p>
                 </div>
             </div>
             <div class="detalle-campo">
@@ -2577,6 +2696,8 @@ function mostrarDetalleIncidencia(detalle) {
     const perm = estado.permisos || {};
     const detalleAcciones = contenido.querySelector('.detalle-acciones');
     if (detalleAcciones && perm.puede_modificar === false) detalleAcciones.style.display = 'none';
+    configurarAnadirImagenesDetalle(puedeModificarDetalle);
+    renderizarImagenesPendientesDetalle();
     const editUsuarioAsignado = document.getElementById('edit-usuario-asignado');
     if (editUsuarioAsignado && perm.puede_asignar === false) editUsuarioAsignado.closest('.detalle-campo')?.style.setProperty('display', 'none');
     const imprimirPdfBtn = document.getElementById('imprimir-pdf-btn');
@@ -2701,6 +2822,132 @@ function actualizarMensajeOverlay(mensaje) {
     }
 }
 
+const DETALLE_IMAGEN_MAX_MB = 10;
+const DETALLE_IMAGEN_MAX_LADO = 1920;
+
+function configurarAnadirImagenesDetalle(activo) {
+    const btn = document.getElementById('btn-anadir-imagenes-detalle');
+    const input = document.getElementById('input-imagenes-detalle');
+    if (!btn || !input || !activo) return;
+    const nuevoBtn = btn.cloneNode(true);
+    btn.parentNode.replaceChild(nuevoBtn, btn);
+    nuevoBtn.addEventListener('click', () => input.click());
+    input.onchange = async (e) => {
+        const files = Array.from(e.target.files || []);
+        e.target.value = '';
+        if (!files.length) return;
+        await procesarArchivosImagenDetalle(files);
+    };
+}
+
+function renderizarImagenesPendientesDetalle() {
+    const container = document.getElementById('galeria-imagenes-pendientes');
+    if (!container) return;
+    if (!imagenesPendientesDetalle.length) {
+        container.innerHTML = '';
+        container.style.display = 'none';
+        return;
+    }
+    container.style.display = 'grid';
+    container.innerHTML = imagenesPendientesDetalle.map((img, idx) => `
+        <div class="imagen-item imagen-item-pendiente">
+            <button type="button" class="imagen-quitar-btn" data-idx="${idx}" title="Quitar">×</button>
+            <img src="${escapeHtml(img.preview)}" alt="${escapeHtml(img.name)}">
+            <span class="imagen-pendiente-nombre">${escapeHtml(img.name)}</span>
+        </div>
+    `).join('');
+    container.querySelectorAll('.imagen-quitar-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const i = parseInt(btn.dataset.idx, 10);
+            if (!Number.isNaN(i)) {
+                imagenesPendientesDetalle.splice(i, 1);
+                renderizarImagenesPendientesDetalle();
+            }
+        });
+    });
+}
+
+async function comprimirImagenParaBC(file) {
+    const maxBytes = DETALLE_IMAGEN_MAX_MB * 1024 * 1024;
+    if (file.size > maxBytes * 3) {
+        throw new Error(`La imagen «${file.name}» supera el tamaño máximo (${DETALLE_IMAGEN_MAX_MB} MB).`);
+    }
+    const dataUrl = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = () => reject(new Error(`No se pudo leer «${file.name}»`));
+        reader.readAsDataURL(file);
+    });
+    const img = await new Promise((resolve, reject) => {
+        const el = new Image();
+        el.onload = () => resolve(el);
+        el.onerror = () => reject(new Error(`Formato no válido: «${file.name}»`));
+        el.src = dataUrl;
+    });
+    let w = img.width;
+    let h = img.height;
+    const maxLado = DETALLE_IMAGEN_MAX_LADO;
+    if (w > maxLado || h > maxLado) {
+        if (w >= h) {
+            h = Math.round(h * (maxLado / w));
+            w = maxLado;
+        } else {
+            w = Math.round(w * (maxLado / h));
+            h = maxLado;
+        }
+    }
+    const canvas = document.createElement('canvas');
+    canvas.width = w;
+    canvas.height = h;
+    canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+    let quality = 0.85;
+    let jpegDataUrl = canvas.toDataURL('image/jpeg', quality);
+    while (jpegDataUrl.length > maxBytes * 1.37 && quality > 0.45) {
+        quality -= 0.1;
+        jpegDataUrl = canvas.toDataURL('image/jpeg', quality);
+    }
+    if (jpegDataUrl.length > maxBytes * 1.37) {
+        throw new Error(`«${file.name}» sigue siendo demasiado grande tras comprimir.`);
+    }
+    const uid = `${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+    const base64 = jpegDataUrl.includes(',') ? jpegDataUrl.split(',')[1] : jpegDataUrl;
+    return {
+        name: `Imagen_${uid}.jpg`,
+        file: base64,
+        preview: jpegDataUrl
+    };
+}
+
+async function procesarArchivosImagenDetalle(files) {
+    const mensajeSpan = document.getElementById('guardar-mensaje');
+    const btn = document.getElementById('btn-anadir-imagenes-detalle');
+    if (btn) btn.disabled = true;
+    let errores = 0;
+    for (const file of files) {
+        if (!file.type.startsWith('image/')) {
+            errores++;
+            continue;
+        }
+        try {
+            const item = await comprimirImagenParaBC(file);
+            imagenesPendientesDetalle.push(item);
+        } catch (err) {
+            errores++;
+            console.error(err);
+            if (mensajeSpan) {
+                mensajeSpan.textContent = `❌ ${err.message || err}`;
+                mensajeSpan.className = 'guardar-mensaje guardar-mensaje-error';
+            }
+        }
+    }
+    renderizarImagenesPendientesDetalle();
+    if (btn) btn.disabled = false;
+    if (imagenesPendientesDetalle.length && mensajeSpan && !errores) {
+        mensajeSpan.textContent = `${imagenesPendientesDetalle.length} imagen(es) pendiente(s). Pulsa «Guardar Cambios».`;
+        mensajeSpan.className = 'guardar-mensaje guardar-mensaje-info';
+    }
+}
+
 async function guardarCambiosIncidencia() {
     if (!detalleActual || !idGtaskActual) {
         alert('No hay detalle de incidencia disponible');
@@ -2748,9 +2995,11 @@ async function guardarCambiosIncidencia() {
     const usuarioOriginal = detalleActual.Id_Uduario_Gtask_Asignado || detalleActual.Id_Usuario_Gtask_Asignado || detalleActual.user_assigned || detalleActual.user || '';
     const hayCambioUsuario = (nuevoUsuarioId || '') !== String(usuarioOriginal);
     
+    const hayImagenesNuevas = imagenesPendientesDetalle.length > 0;
+
     if (nuevaDescripcion === descripcionOriginalTexto && 
         nuevaFechaHora === fechaOriginalInput && 
-        nuevoRecurso === recursoOriginal && !hayCambioEstado && !hayCambioUsuario) {
+        nuevoRecurso === recursoOriginal && !hayCambioEstado && !hayCambioUsuario && !hayImagenesNuevas) {
         if (mensajeSpan) {
             mensajeSpan.textContent = 'No hay cambios para guardar';
             mensajeSpan.className = 'guardar-mensaje guardar-mensaje-info';
@@ -2790,6 +3039,12 @@ async function guardarCambiosIncidencia() {
         if (nuevoUsuarioId !== undefined) {
             datosActualizacion.usuario_id = nuevoUsuarioId;
         }
+        if (hayImagenesNuevas) {
+            datosActualizacion.imagenes = imagenesPendientesDetalle.map(img => ({
+                name: img.name,
+                file: img.file
+            }));
+        }
         
         const response = await fetch('/api/actualizar-incidencia', {
             method: 'POST',
@@ -2818,13 +3073,28 @@ async function guardarCambiosIncidencia() {
                 detalleActual.state = estadoPendienteGuardar;
                 estadoPendienteGuardar = null;
             }
+            if (hayImagenesNuevas) {
+                imagenesPendientesDetalle = [];
+                renderizarImagenesPendientesDetalle();
+                try {
+                    const resDet = await fetch(`/api/detalle-incidencia/${encodeURIComponent(idGtaskActual)}`);
+                    const dataDet = await resDet.json();
+                    if (dataDet.success && dataDet.detalle) {
+                        detalleActual = dataDet.detalle;
+                        mostrarDetalleIncidencia(dataDet.detalle);
+                    }
+                } catch (e) {
+                    console.warn('No se pudo refrescar el detalle tras subir imágenes', e);
+                }
+            }
             
             if (mensajeSpan) {
-                mensajeSpan.textContent = '✅ Cambios guardados correctamente';
+                mensajeSpan.textContent = hayImagenesNuevas
+                    ? '✅ Cambios e imágenes guardados correctamente'
+                    : '✅ Cambios guardados correctamente';
                 mensajeSpan.className = 'guardar-mensaje guardar-mensaje-success';
             }
             
-            // Recargar incidencias para reflejar los cambios
             setTimeout(() => {
                 cargarIncidencias();
             }, 1000);
@@ -3023,14 +3293,98 @@ async function notificarWhatsappTaller() {
 }
 
 // Antes de imprimir, pasar por actualizar incidencia para sincronizar con BC
-async function imprimirPDFPasandoPorActualizar() {
-    if (!detalleActual || !idGtaskActual) return;
+/** Extrae texto legible de errores API (evita alert «[object Object]»). */
+function formatApiError(error) {
+    if (error == null || error === '') return 'Error desconocido';
+    if (typeof error === 'string') return error;
+    if (typeof error === 'object') {
+        // OData: { message: { lang, value } } o { message: "..." }
+        if (error.message != null) {
+            if (typeof error.message === 'object') {
+                if (error.message.value != null) return formatApiError(error.message.value);
+                return formatApiError(error.message);
+            }
+            return String(error.message);
+        }
+        if (error.value != null) return formatApiError(error.value);
+        if (error.error != null) return formatApiError(error.error);
+        if (error.Message != null) return formatApiError(error.Message);
+        try {
+            return JSON.stringify(error);
+        } catch (_) {
+            return String(error);
+        }
+    }
+    return String(error);
+}
+
+function hayCambiosPendientesDetalleIncidencia() {
+    if (!detalleActual) return false;
     const descripcionInput = document.getElementById('edit-descripcion');
     const fechaHoraInput = document.getElementById('edit-fecha-hora');
     const resourceInput = document.getElementById('edit-resource');
     const usuarioAsignadoSelect = document.getElementById('edit-usuario-asignado');
     const nuevaDescripcion = (descripcionInput && descripcionInput.value.trim()) || detalleActual.description || '';
-    const nuevaFechaHora = (fechaHoraInput && fechaHoraInput.value) || (detalleActual.fecha ? new Date(detalleActual.fecha).toISOString().slice(0, 16) : '');
+    const nuevaFechaHora = (fechaHoraInput && fechaHoraInput.value) || '';
+    const nuevoRecurso = (resourceInput && resourceInput.value.trim()) || detalleActual.resource || '';
+    const nuevoUsuarioId = (usuarioAsignadoSelect && usuarioAsignadoSelect.value.trim()) || '';
+
+    const descripcionOriginal = detalleActual.description || '';
+    const tempDiv = document.createElement('div');
+    tempDiv.innerHTML = descripcionOriginal;
+    const descripcionOriginalTexto = tempDiv.textContent || tempDiv.innerText || descripcionOriginal;
+
+    let fechaOriginalInput = '';
+    if (detalleActual.fecha) {
+        try {
+            const fecha = new Date(detalleActual.fecha);
+            const year = fecha.getFullYear();
+            const month = String(fecha.getMonth() + 1).padStart(2, '0');
+            const day = String(fecha.getDate()).padStart(2, '0');
+            const hours = String(fecha.getHours()).padStart(2, '0');
+            const minutes = String(fecha.getMinutes()).padStart(2, '0');
+            fechaOriginalInput = `${year}-${month}-${day}T${hours}:${minutes}`;
+        } catch (_) {}
+    }
+
+    const recursoOriginal = detalleActual.resource || '';
+    const usuarioOriginal = detalleActual.Id_Uduario_Gtask_Asignado || detalleActual.Id_Usuario_Gtask_Asignado || detalleActual.user_assigned || detalleActual.user || '';
+
+    return nuevaDescripcion !== descripcionOriginalTexto
+        || (nuevaFechaHora && nuevaFechaHora !== fechaOriginalInput)
+        || nuevoRecurso !== recursoOriginal
+        || estadoPendienteGuardar !== null
+        || (nuevoUsuarioId || '') !== String(usuarioOriginal || '')
+        || imagenesPendientesDetalle.length > 0;
+}
+
+async function imprimirPDFPasandoPorActualizar() {
+    if (!detalleActual || !idGtaskActual) return;
+
+    if (!hayCambiosPendientesDetalleIncidencia()) {
+        await generarPDF(detalleActual, idGtaskActual);
+        return;
+    }
+
+    const descripcionInput = document.getElementById('edit-descripcion');
+    const fechaHoraInput = document.getElementById('edit-fecha-hora');
+    const resourceInput = document.getElementById('edit-resource');
+    const usuarioAsignadoSelect = document.getElementById('edit-usuario-asignado');
+    const nuevaDescripcion = (descripcionInput && descripcionInput.value.trim()) || detalleActual.description || '';
+    let nuevaFechaHora = (fechaHoraInput && fechaHoraInput.value) || '';
+    if (!nuevaFechaHora && detalleActual.fecha) {
+        try {
+            const fecha = new Date(detalleActual.fecha);
+            const year = fecha.getFullYear();
+            const month = String(fecha.getMonth() + 1).padStart(2, '0');
+            const day = String(fecha.getDate()).padStart(2, '0');
+            const hours = String(fecha.getHours()).padStart(2, '0');
+            const minutes = String(fecha.getMinutes()).padStart(2, '0');
+            nuevaFechaHora = `${year}-${month}-${day}T${hours}:${minutes}`;
+        } catch (_) {
+            nuevaFechaHora = '';
+        }
+    }
     const nuevoRecurso = (resourceInput && resourceInput.value.trim()) || detalleActual.resource || '';
     const nuevoUsuarioId = (usuarioAsignadoSelect && usuarioAsignadoSelect.value.trim()) || null;
     const datosActualizacion = {
@@ -3045,25 +3399,50 @@ async function imprimirPDFPasandoPorActualizar() {
     if (nuevoUsuarioId !== undefined && nuevoUsuarioId !== null) {
         datosActualizacion.usuario_id = nuevoUsuarioId;
     }
+    if (imagenesPendientesDetalle.length > 0) {
+        datosActualizacion.imagenes = imagenesPendientesDetalle.map(img => ({
+            name: img.name,
+            file: img.file
+        }));
+    }
     try {
         const response = await fetch('/api/actualizar-incidencia', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(datosActualizacion)
         });
-        const data = await response.json();
-        if (!data.success) {
-            alert('Error al actualizar la incidencia antes de imprimir: ' + (data.error || 'Error desconocido'));
-            return;
+        let data = {};
+        try {
+            data = await response.json();
+        } catch (_) {
+            data = {};
         }
-        // Actualizar detalle en memoria con lo guardado para que el PDF sea consistente
-        detalleActual.description = nuevaDescripcion;
-        if (nuevaFechaHora) detalleActual.fecha = new Date(nuevaFechaHora).toISOString();
-        detalleActual.resource = nuevoRecurso;
-        if (estadoPendienteGuardar) detalleActual.state = estadoPendienteGuardar;
+        if (!response.ok || !data.success) {
+            const msg = formatApiError(data.error || data.message || response.statusText);
+            console.warn('No se pudo sincronizar con BC antes de imprimir:', data.error || data);
+            if (!confirm(`No se pudo actualizar en Business Central antes de imprimir:\n\n${msg}\n\n¿Imprimir igualmente con los datos actuales?`)) {
+                return;
+            }
+        } else {
+            detalleActual.description = nuevaDescripcion;
+            if (nuevaFechaHora) detalleActual.fecha = new Date(nuevaFechaHora).toISOString();
+            detalleActual.resource = nuevoRecurso;
+            if (estadoPendienteGuardar) detalleActual.state = estadoPendienteGuardar;
+            if (imagenesPendientesDetalle.length > 0) {
+                imagenesPendientesDetalle = [];
+            }
+        }
         await generarPDF(detalleActual, idGtaskActual);
     } catch (e) {
-        alert('Error al actualizar o imprimir: ' + (e.message || String(e)));
+        console.error(e);
+        if (!confirm(`Error al sincronizar antes de imprimir:\n\n${e.message || String(e)}\n\n¿Imprimir igualmente?`)) {
+            return;
+        }
+        try {
+            await generarPDF(detalleActual, idGtaskActual);
+        } catch (e2) {
+            alert('Error al generar el PDF: ' + (e2.message || String(e2)));
+        }
     }
 }
 
