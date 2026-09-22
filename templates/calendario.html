@@ -128,6 +128,8 @@
             </div>
             <div class="sidebar-section">
                 <div class="sidebar-buttons">
+                    <button id="nueva-peticion-emt-btn" class="btn-sidebar" type="button">Petición EMT</button>
+                    <button id="nueva-peticion-btn" class="btn-sidebar" type="button">Petición</button>
                     <button id="refrescar-btn" class="btn-sidebar">🔄 Refrescar</button>
                     <button id="filtro-usuarios-btn" class="btn-sidebar btn-filtro">🔍 Filtrar Usuarios</button>
                     <button id="asignar-automatico-btn" class="btn-sidebar btn-asignar-auto">🤖 Asignar Automáticamente</button>
@@ -137,6 +139,30 @@
         </aside>
         </div>
     </div>
+    <div id="peticion-modal" class="modal">
+        <div class="modal-content">
+            <span id="close-peticion">&times;</span>
+            <h2 id="peticion-modal-titulo">Nueva petición</h2>
+            <p id="peticion-modal-ayuda" class="peticion-ayuda"></p>
+            <form id="peticion-form">
+                <div class="form-group">
+                    <label for="peticion-busqueda">Parada, emplazamiento o recurso</label>
+                    <div class="peticion-busqueda-wrap">
+                        <input type="text" id="peticion-busqueda" autocomplete="off" placeholder="Código o nombre">
+                        <div id="peticion-autocomplete" class="autocomplete-dropdown" style="display: none;"></div>
+                    </div>
+                    <p id="peticion-seleccion" class="peticion-seleccion"></p>
+                </div>
+                <div class="form-group">
+                    <label for="peticion-descripcion">Descripción</label>
+                    <textarea id="peticion-descripcion" rows="3" maxlength="100" placeholder="Qué hay que hacer"></textarea>
+                </div>
+                <button type="submit" class="btn-login" id="peticion-crear-btn">Crear petición</button>
+                <div id="peticion-mensaje" class="error-message"></div>
+            </form>
+        </div>
+    </div>
+
     <!-- Modal de Detalle de Incidencia -->
     <div id="detalle-modal" class="modal">
         <div class="modal-content modal-detalle">
@@ -259,8 +285,8 @@
                             </th>
                             <th scope="col" class="sortable" data-sort="estado">
                                 <div class="vista-lista-th-wrap">
-                                    <span class="vista-lista-th-label">Estado incidencia <span class="sort-icon"></span></span>
-                                    <button type="button" class="vista-lista-filter-btn" data-col="estado" title="Autofiltro" aria-label="Filtrar columna Estado incidencia">▾</button>
+                                    <span class="vista-lista-th-label">Estado <span class="sort-icon"></span></span>
+                                    <button type="button" class="vista-lista-filter-btn" data-col="estado" title="Autofiltro" aria-label="Filtrar columna Estado">▾</button>
                                 </div>
                             </th>
                             <th scope="col" class="sortable" data-sort="descripcion">

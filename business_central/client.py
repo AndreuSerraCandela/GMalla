@@ -58,6 +58,7 @@ try:
         get_bc_listado_mantenimiento_recurso_url,
         get_bc_procedure_mantenimiento_emplaz,
         get_bc_procedure_mantenimiento_recurso,
+        get_bc_post_crear_peticion_url,
         get_bc_post_respuesta_whatsapp_url,
         get_bc_auth_header,
         get_bc_auth_credentials,
@@ -78,6 +79,7 @@ except ImportError:
         get_bc_listado_mantenimiento_recurso_url,
         get_bc_procedure_mantenimiento_emplaz,
         get_bc_procedure_mantenimiento_recurso,
+        get_bc_post_crear_peticion_url,
         get_bc_post_respuesta_whatsapp_url,
         get_bc_auth_header,
         get_bc_auth_credentials,
@@ -805,6 +807,51 @@ class BusinessCentralClient:
 
         data = self._parse_bc_codeunit_json_value(response)
         return self._extraer_filas_mantenimiento_bc(data)
+
+    def crear_peticion(self, *, emt: bool, codigo: str, tipo: str = "", descripcion: str = "") -> Dict[str, Any]:
+        """
+        Crea una petición (EMT o interna) y su orden de trabajo vía PostCrearPeticion.
+        """
+        url = get_bc_post_crear_peticion_url()
+        payload = {
+            "emt": bool(emt),
+            "codigo": codigo,
+            "tipo": tipo or "",
+            "descripcion": descripcion or "",
+        }
+        datos = {"jsonText": json.dumps(payload, ensure_ascii=False)}
+        params = {
+            "company": BC_CONFIG["company"],
+            "procedure": "PostCrearPeticion",
+        }
+        headers = {"Content-Type": "application/json", "Accept": "application/json"}
+        auth_header = get_bc_auth_header()
+        auth_credentials = None if auth_header else get_bc_auth_credentials()
+        if auth_header:
+            headers["Authorization"] = auth_header
+
+        timeout = BC_CONFIG.get("timeout", 120)
+        response = requests.post(
+            url,
+            params=params,
+            headers=headers,
+            data=json.dumps(datos),
+            auth=auth_credentials,
+            timeout=timeout,
+        )
+        if response.status_code not in (200, 201):
+            detalle = response.text[:800]
+            try:
+                cuerpo = response.json()
+                detalle = extract_bc_error_message(cuerpo.get("error") or cuerpo)
+            except (ValueError, AttributeError):
+                pass
+            raise RuntimeError(detalle or f"BC HTTP {response.status_code}")
+
+        data = self._parse_bc_codeunit_json_value(response)
+        if not isinstance(data, dict):
+            raise RuntimeError("Respuesta de Business Central no reconocida")
+        return data
 
     def obtener_mantenimiento_emplazamientos(
         self, filtros: Optional[dict] = None

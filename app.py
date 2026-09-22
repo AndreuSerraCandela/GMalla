@@ -877,6 +877,45 @@ def buscar_elementos():
         }), 500
 
 
+@app.route('/api/crear-peticion', methods=['POST'])
+def crear_peticion():
+    """Crea una petición EMT o interna en Business Central, con su orden de trabajo."""
+    try:
+        data = request.json or {}
+        codigo = (data.get('codigo') or '').strip()
+        tipo = (data.get('tipo') or '').strip()
+        descripcion = (data.get('descripcion') or '').strip()
+        emt = bool(data.get('emt'))
+
+        if not codigo:
+            return jsonify({
+                'success': False,
+                'error': 'Selecciona una parada, un emplazamiento o un recurso'
+            }), 400
+
+        resultado = bc_client.crear_peticion(
+            emt=emt,
+            codigo=codigo,
+            tipo=tipo,
+            descripcion=descripcion,
+        )
+        if not resultado.get('success'):
+            return jsonify({
+                'success': False,
+                'error': resultado.get('mensaje') or 'No se pudo crear la petición'
+            }), 400
+        return jsonify({
+            'success': True,
+            'no': resultado.get('no_incidencia') or '',
+            'mensaje': resultado.get('mensaje') or 'Petición creada'
+        })
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
 @app.route('/api/actualizar-incidencia', methods=['POST'])
 def actualizar_incidencia():
     """API para actualizar descripción, fecha/hora y recurso de una incidencia"""

@@ -409,6 +409,30 @@ body {
     color: white !important;
 }
 
+.peticion-ayuda {
+    color: #555;
+    font-size: 0.9rem;
+    margin: 0 0 1rem;
+}
+
+.peticion-busqueda-wrap {
+    position: relative;
+}
+
+.peticion-seleccion {
+    margin: 0.4rem 0 0;
+    color: #333;
+    font-size: 0.9rem;
+    min-height: 1.2rem;
+}
+
+#peticion-busqueda,
+#peticion-descripcion {
+    width: 100%;
+    box-sizing: border-box;
+    font-family: 'Montserrat', sans-serif;
+}
+
 /* Selector de vista: Lista, Simple, Calendario */
 .vista-selector {
     display: flex;
@@ -538,10 +562,13 @@ body {
     min-width: 0;
 }
 .vista-lista-th-label {
-    flex: 1;
-    min-width: 0;
+    flex: 1 1 auto;
+    min-width: 3.5em;
     overflow: hidden;
     text-overflow: ellipsis;
+}
+.vista-lista-tabla thead th[data-sort="estado"] {
+    min-width: 7.5rem;
 }
 .vista-lista-filter-btn {
     flex-shrink: 0;
@@ -1035,7 +1062,8 @@ body {
     }
 }
 
-.close {
+.close,
+#close-peticion {
     color: #aaa;
     float: right;
     font-size: 28px;
@@ -1044,7 +1072,9 @@ body {
 }
 
 .close:hover,
-.close:focus {
+.close:focus,
+#close-peticion:hover,
+#close-peticion:focus {
     color: #000;
 }
 

@@ -377,6 +377,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     
     // Event listeners
     document.getElementById('refrescar-btn').addEventListener('click', cargarDatos);
+    configurarCrearPeticion();
     
     // Login/Logout - Toggle según estado
     document.getElementById('login-icon').addEventListener('click', () => {
@@ -4673,5 +4674,155 @@ async function ejecutarReasignacionAutomatica() {
     } finally {
         btn.disabled = false;
         btn.textContent = textoOriginal;
+    }
+}
+
+const peticionAlta = { emt: false, elemento: null };
+
+function configurarCrearPeticion() {
+    const modal = document.getElementById('peticion-modal');
+    const form = document.getElementById('peticion-form');
+    const busqueda = document.getElementById('peticion-busqueda');
+    const autocomplete = document.getElementById('peticion-autocomplete');
+    if (!modal || !form || !busqueda || !autocomplete) return;
+
+    document.getElementById('nueva-peticion-emt-btn')?.addEventListener('click', () => abrirModalPeticion(true));
+    document.getElementById('nueva-peticion-btn')?.addEventListener('click', () => abrirModalPeticion(false));
+    document.getElementById('close-peticion')?.addEventListener('click', cerrarModalPeticion);
+    window.addEventListener('click', (e) => {
+        if (e.target === modal) cerrarModalPeticion();
+    });
+    form.addEventListener('submit', enviarPeticion);
+
+    let timeoutBusqueda = null;
+    busqueda.addEventListener('input', () => {
+        peticionAlta.elemento = null;
+        const seleccion = document.getElementById('peticion-seleccion');
+        if (seleccion) seleccion.textContent = '';
+        const q = busqueda.value.trim();
+        if (timeoutBusqueda) clearTimeout(timeoutBusqueda);
+        if (!q) {
+            autocomplete.style.display = 'none';
+            return;
+        }
+        timeoutBusqueda = setTimeout(() => buscarElementosPeticion(q), 300);
+    });
+}
+
+function abrirModalPeticion(emt) {
+    peticionAlta.emt = emt;
+    peticionAlta.elemento = null;
+    const titulo = document.getElementById('peticion-modal-titulo');
+    const ayuda = document.getElementById('peticion-modal-ayuda');
+    const boton = document.getElementById('peticion-crear-btn');
+    const mensaje = document.getElementById('peticion-mensaje');
+    if (titulo) titulo.textContent = emt ? 'Petición EMT' : 'Petición';
+    if (ayuda) {
+        ayuda.textContent = emt
+            ? 'Petición externa de una parada. Crea la orden de trabajo EMT.'
+            : 'Petición interna de un emplazamiento o un recurso. Crea la orden de trabajo.';
+    }
+    if (boton) boton.textContent = emt ? 'Crear petición EMT' : 'Crear petición';
+    if (mensaje) {
+        mensaje.textContent = '';
+        mensaje.style.display = 'none';
+    }
+    const busqueda = document.getElementById('peticion-busqueda');
+    const descripcion = document.getElementById('peticion-descripcion');
+    const seleccion = document.getElementById('peticion-seleccion');
+    if (busqueda) busqueda.value = '';
+    if (descripcion) descripcion.value = '';
+    if (seleccion) seleccion.textContent = '';
+    const autocomplete = document.getElementById('peticion-autocomplete');
+    if (autocomplete) autocomplete.style.display = 'none';
+    document.getElementById('peticion-modal').style.display = 'block';
+}
+
+function cerrarModalPeticion() {
+    const modal = document.getElementById('peticion-modal');
+    if (modal) modal.style.display = 'none';
+}
+
+async function buscarElementosPeticion(q) {
+    const autocomplete = document.getElementById('peticion-autocomplete');
+    if (!autocomplete) return;
+    try {
+        const response = await fetch(`/api/buscar-elementos?q=${encodeURIComponent(q)}`);
+        const data = await response.json();
+        const elementos = (data.success && data.elementos) ? data.elementos : [];
+        if (!elementos.length) {
+            autocomplete.style.display = 'none';
+            return;
+        }
+        autocomplete.innerHTML = '';
+        elementos.forEach((elemento) => {
+            const item = document.createElement('div');
+            item.className = 'autocomplete-item';
+            item.innerHTML = `<strong>${escapeHtml(elemento.no || '')}</strong>`
+                + (elemento.name ? `<span style="color:#666;margin-left:10px;">${escapeHtml(elemento.name)}</span>` : '')
+                + (elemento.tipo ? `<span style="color:#999;margin-left:10px;font-size:0.9em;">(${escapeHtml(elemento.tipo)})</span>` : '');
+            item.addEventListener('click', () => seleccionarElementoPeticion(elemento));
+            autocomplete.appendChild(item);
+        });
+        autocomplete.style.display = 'block';
+    } catch (error) {
+        console.error('Error al buscar elementos:', error);
+        autocomplete.style.display = 'none';
+    }
+}
+
+function seleccionarElementoPeticion(elemento) {
+    peticionAlta.elemento = elemento;
+    const busqueda = document.getElementById('peticion-busqueda');
+    const seleccion = document.getElementById('peticion-seleccion');
+    const autocomplete = document.getElementById('peticion-autocomplete');
+    if (busqueda) busqueda.value = elemento.no || '';
+    if (seleccion) {
+        seleccion.textContent = [elemento.no, elemento.name, elemento.tipo].filter(Boolean).join(' · ');
+    }
+    if (autocomplete) autocomplete.style.display = 'none';
+}
+
+async function enviarPeticion(e) {
+    e.preventDefault();
+    const mensaje = document.getElementById('peticion-mensaje');
+    const boton = document.getElementById('peticion-crear-btn');
+    const elemento = peticionAlta.elemento;
+    if (!elemento || !elemento.no) {
+        if (mensaje) {
+            mensaje.textContent = 'Elige un elemento de la lista de búsqueda.';
+            mensaje.style.display = 'block';
+        }
+        return;
+    }
+    const descripcion = (document.getElementById('peticion-descripcion')?.value || '').trim();
+    if (boton) boton.disabled = true;
+    if (mensaje) {
+        mensaje.textContent = 'Creando…';
+        mensaje.style.display = 'block';
+    }
+    try {
+        const response = await fetch('/api/crear-peticion', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                emt: peticionAlta.emt,
+                codigo: elemento.no,
+                tipo: elemento.tipo || '',
+                descripcion
+            })
+        });
+        const data = await response.json();
+        if (!response.ok || !data.success) {
+            if (mensaje) mensaje.textContent = data.error || 'No se pudo crear la petición';
+            return;
+        }
+        cerrarModalPeticion();
+        alert(data.mensaje || `Petición creada: ${data.no || ''}`);
+        if (typeof cargarDatos === 'function') await cargarDatos();
+    } catch (error) {
+        if (mensaje) mensaje.textContent = error.message || 'Error de conexión';
+    } finally {
+        if (boton) boton.disabled = false;
     }
 }

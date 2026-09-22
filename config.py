@@ -197,6 +197,21 @@ def get_bc_procedure_mantenimiento_emplaz() -> str:
     )
 
 
+def get_bc_post_crear_peticion_url() -> str:
+    """
+    OData codeunit GTask: procedimiento PostCrearPeticion.
+    Mismo patrón que GtaskMalla_DetalleIncidencia.
+    """
+    base_url = get_bc_url().rstrip("/")
+    endpoint = os.getenv(
+        "BUSINESS_CENTRAL_ENDPOINT_POST_CREAR_PETICION",
+        "/powerbi/ODataV4/GtaskMalla_PostCrearPeticion",
+    )
+    if not endpoint.startswith("/"):
+        endpoint = "/" + endpoint
+    return f"{base_url}{endpoint}"
+
+
 def get_bc_procedure_mantenimiento_recurso() -> str:
     return os.getenv(
         "BUSINESS_CENTRAL_PROCEDURE_MANTENIMIENTO_RECURSO",
