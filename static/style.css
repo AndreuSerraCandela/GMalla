@@ -693,6 +693,7 @@ body {
     text-align: right;
 }
 .vista-lista-fecha { white-space: nowrap; }
+.vista-lista-estado { white-space: nowrap; }
 .vista-lista-no { font-weight: 600; white-space: nowrap; }
 .vista-lista-descripcion { max-width: 280px; overflow: hidden; text-overflow: ellipsis; }
 .vista-lista-tipo { white-space: nowrap; }

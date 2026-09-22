@@ -90,7 +90,7 @@ let vistaListaEstado = {
     columnFilters: {}
 };
 
-const VISTA_LISTA_SORT_COLS = ['no', 'fecha', 'descripcion', 'tipo', 'subtipo', 'comunicado_emt', 'recurso', 'usuario_creador', 'usuario'];
+const VISTA_LISTA_SORT_COLS = ['no', 'fecha', 'estado', 'descripcion', 'tipo', 'subtipo', 'comunicado_emt', 'recurso', 'usuario_creador', 'usuario'];
 
 /** Convierte valores heterogéneos (bool/string/num) a booleano real. */
 function esOrdenTrabajo(incidencia) {
@@ -134,6 +134,7 @@ function formatFechaListaIncidencia(inc) {
 function getVistaListaColumnDisplayValue(inc, col) {
     if (col === 'no') return String(inc.no || inc.id_gtask || '');
     if (col === 'fecha') return formatFechaListaIncidencia(inc);
+    if (col === 'estado') return formatearEstado(inc.estado);
     if (col === 'descripcion') {
         const raw = inc.descripcion || '-';
         return raw.length <= 120 ? raw : raw.substring(0, 120) + '...';
@@ -1910,10 +1911,11 @@ function generarVistaLista() {
             const creador = (inc.usuario_creador || '').toLowerCase();
             const creadorNombre = nombreUsuario(inc.usuario_creador).toLowerCase();
             const comunicadoEMT = (parseBooleanLike(inc.comunicado_por_emt) ? 'sí' : 'no');
+            const estadoInc = formatearEstado(inc.estado).toLowerCase();
             return no.includes(q) || desc.includes(q) || tipo.includes(q) || subtipo.includes(q)
                 || recursoNombre.includes(q) || recursoNum.includes(q)
                 || dir.includes(q) || user.includes(q) || userNombre.includes(q) || creador.includes(q) || creadorNombre.includes(q)
-                || comunicadoEMT.includes(q);
+                || comunicadoEMT.includes(q) || estadoInc.includes(q);
         });
     }
     // Ordenar
@@ -1922,6 +1924,7 @@ function generarVistaLista() {
     const getVal = (inc, c) => {
         if (c === 'no') return (inc.no || inc.id_gtask || '').toLowerCase();
         if (c === 'fecha') return inc.fecha_hora ? new Date(inc.fecha_hora).getTime() : (inc.fecha ? new Date(inc.fecha).getTime() : 0);
+        if (c === 'estado') return formatearEstado(inc.estado).toLowerCase();
         if (c === 'descripcion') return (inc.descripcion || '').toLowerCase();
         if (c === 'tipo') return (inc.tipo_incidencia || '').toLowerCase();
         if (c === 'subtipo') return (inc.subtipo_incidencia || '').toLowerCase();
@@ -1959,7 +1962,7 @@ function generarVistaLista() {
         const msgFiltro = (vistaListaEstado.filtro || hayFiltroCols)
             ? 'No hay coincidencias con los filtros aplicados.'
             : 'No hay incidencias que mostrar. Usa "Refrescar" para cargar datos.';
-        tr.innerHTML = '<td colspan="10" class="vista-lista-empty">' + msgFiltro + '</td>';
+        tr.innerHTML = '<td colspan="11" class="vista-lista-empty">' + msgFiltro + '</td>';
         tbody.appendChild(tr);
         actualizarIndicadoresAutofiltroVistaLista();
         return;
@@ -1967,6 +1970,8 @@ function generarVistaLista() {
     incidencias.forEach(inc => {
         const tr = document.createElement('tr');
         const fechaStr = formatFechaListaIncidencia(inc);
+        const estadoIncidencia = formatearEstado(inc.estado);
+        const estadoBadgeClase = estadoClaseBadge(inc.estado);
         const descripcion = (inc.descripcion || '-').substring(0, 120) + ((inc.descripcion && inc.descripcion.length > 120) ? '...' : '');
         const recurso = formatearRecursoDisplay(inc);
         const tipoIncidencia = inc.tipo_incidencia || '-';
@@ -1986,6 +1991,7 @@ function generarVistaLista() {
         tr.innerHTML = `
             <td class="vista-lista-no">${escapeHtml(noIncidencia)}</td>
             <td class="vista-lista-fecha">${fechaStr}</td>
+            <td class="vista-lista-estado"><span class="estado-badge estado-${estadoBadgeClase}">${escapeHtml(estadoIncidencia)}</span></td>
             <td class="vista-lista-descripcion" title="${(inc.descripcion || '').replace(/"/g, '&quot;')}">${escapeHtml(descripcion)}</td>
             <td class="vista-lista-tipo">${escapeHtml(tipoIncidencia)}</td>
             <td class="vista-lista-subtipo">${escapeHtml(subtipoIncidencia)}</td>

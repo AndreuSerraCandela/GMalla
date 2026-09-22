@@ -238,7 +238,7 @@
                 <h2 id="vista-lista-titulo">Todas las tareas</h2>
                 <div class="vista-lista-filtro">
                     <label for="vista-lista-input-filtro">Buscar:</label>
-                    <input type="text" id="vista-lista-input-filtro" class="vista-lista-input-filtro" placeholder="Filtrar por Nº, descripción, tipo, subtipo, Comunicado por EMT, recurso, usuario..." autocomplete="off">
+                    <input type="text" id="vista-lista-input-filtro" class="vista-lista-input-filtro" placeholder="Filtrar por Nº, estado, descripción, tipo, subtipo, Comunicado por EMT, recurso, usuario..." autocomplete="off">
                 </div>
             </div>
             <div class="vista-lista-table-wrapper">
@@ -255,6 +255,12 @@
                                 <div class="vista-lista-th-wrap">
                                     <span class="vista-lista-th-label">Fecha <span class="sort-icon"></span></span>
                                     <button type="button" class="vista-lista-filter-btn" data-col="fecha" title="Autofiltro" aria-label="Filtrar columna Fecha">▾</button>
+                                </div>
+                            </th>
+                            <th scope="col" class="sortable" data-sort="estado">
+                                <div class="vista-lista-th-wrap">
+                                    <span class="vista-lista-th-label">Estado incidencia <span class="sort-icon"></span></span>
+                                    <button type="button" class="vista-lista-filter-btn" data-col="estado" title="Autofiltro" aria-label="Filtrar columna Estado incidencia">▾</button>
                                 </div>
                             </th>
                             <th scope="col" class="sortable" data-sort="descripcion">
