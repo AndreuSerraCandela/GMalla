@@ -422,6 +422,7 @@ class BusinessCentralClient:
                 "resource": incidencia.recurso or "",
                 "user": incidencia.usuario_creador or "",  # Creador (Id_Uduario_Gtask), no se modifica
                 "user_assigned": incidencia.usuario or "",  # Usuario asignado (Id_Uduario_Gtask_Asignado)
+                **({"user_follow": incidencia.usuario_seguimiento or ""} if getattr(incidencia, "seguimiento_informado", False) else {}),
                 "fechahora": fecha_hora_str,
                 "image": image_documents,
                 "audio": []

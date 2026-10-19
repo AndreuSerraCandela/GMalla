@@ -2515,6 +2515,7 @@ function mostrarDetalleIncidencia(detalle) {
     // Usuario asignado: ID puede venir en varios campos del detalle BC
     const userIdAsignado = detalle.Id_Uduario_Gtask_Asignado || detalle.Id_Usuario_Gtask_Asignado || detalle.user_assigned;
     const nombreUsuario = obtenerNombreUsuario(userIdAsignado,true);
+    const userIdSeguimiento = detalle.user_follow || '';
     
     // Formatear geolocalización (puntoX es longitud, puntoY es latitud) - solo el icono
     let geolocalizacionIcono = '';
@@ -2652,6 +2653,18 @@ function mostrarDetalleIncidencia(detalle) {
                     </select>
                 </div>
                 <div class="detalle-campo" style="flex: 1;">
+                    <label>Usuario seguimiento:</label>
+                    <select id="edit-usuario-seguimiento" class="detalle-input detalle-select-usuario">
+                        <option value="">— Sin seguimiento —</option>
+                        ${(estado.usuarios || []).map(u => {
+                            const uid = String(u.id || u.user_id || u.userId || u._id || '');
+                            const nom = u.name || u.username || u.nombre || uid;
+                            const sel = (uid && userIdSeguimiento && (uid === String(userIdSeguimiento) || uid.includes(String(userIdSeguimiento)) || String(userIdSeguimiento).includes(uid))) ? ' selected' : '';
+                            return `<option value="${escapeHtml(uid)}"${sel}>${escapeHtml(nom)}</option>`;
+                        }).join('')}
+                    </select>
+                </div>
+                <div class="detalle-campo" style="flex: 1;">
                     <label>Comunicado por EMT:</label>
                     <p class="detalle-campo-solo-lectura">${parseBooleanLike(detalle.Comunicado_por_EMT ?? detalle.comunicado_por_emt) ? 'Sí' : 'No'}</p>
                 </div>
@@ -2707,6 +2720,8 @@ function mostrarDetalleIncidencia(detalle) {
     renderizarImagenesPendientesDetalle();
     const editUsuarioAsignado = document.getElementById('edit-usuario-asignado');
     if (editUsuarioAsignado && perm.puede_asignar === false) editUsuarioAsignado.closest('.detalle-campo')?.style.setProperty('display', 'none');
+    const editUsuarioSeguimiento = document.getElementById('edit-usuario-seguimiento');
+    if (editUsuarioSeguimiento && perm.puede_asignar === false) editUsuarioSeguimiento.closest('.detalle-campo')?.style.setProperty('display', 'none');
     const imprimirPdfBtn = document.getElementById('imprimir-pdf-btn');
     if (imprimirPdfBtn && perm.puede_imprimir === false) imprimirPdfBtn.style.display = 'none';
     const waTallerBtn = document.getElementById('whatsapp-taller-btn');
@@ -2965,6 +2980,7 @@ async function guardarCambiosIncidencia() {
     const fechaHoraInput = document.getElementById('edit-fecha-hora');
     const resourceInput = document.getElementById('edit-resource');
     const usuarioAsignadoSelect = document.getElementById('edit-usuario-asignado');
+    const usuarioSeguimientoSelect = document.getElementById('edit-usuario-seguimiento');
     const guardarBtn = document.getElementById('guardar-cambios-btn');
     const mensajeSpan = document.getElementById('guardar-mensaje');
     
@@ -2977,6 +2993,7 @@ async function guardarCambiosIncidencia() {
     const nuevaFechaHora = fechaHoraInput.value;
     const nuevoRecurso = resourceInput.value.trim();
     const nuevoUsuarioId = (usuarioAsignadoSelect && usuarioAsignadoSelect.value.trim()) || null;
+    const nuevoSeguimientoId = (usuarioSeguimientoSelect && usuarioSeguimientoSelect.value.trim()) || '';
     
     // Validar que haya cambios
     const descripcionOriginal = detalleActual.description || '';
@@ -3001,12 +3018,14 @@ async function guardarCambiosIncidencia() {
     const hayCambioEstado = estadoPendienteGuardar !== null;
     const usuarioOriginal = detalleActual.Id_Uduario_Gtask_Asignado || detalleActual.Id_Usuario_Gtask_Asignado || detalleActual.user_assigned || detalleActual.user || '';
     const hayCambioUsuario = (nuevoUsuarioId || '') !== String(usuarioOriginal);
+    const seguimientoOriginal = detalleActual.user_follow || '';
+    const hayCambioSeguimiento = nuevoSeguimientoId !== String(seguimientoOriginal);
     
     const hayImagenesNuevas = imagenesPendientesDetalle.length > 0;
 
     if (nuevaDescripcion === descripcionOriginalTexto && 
         nuevaFechaHora === fechaOriginalInput && 
-        nuevoRecurso === recursoOriginal && !hayCambioEstado && !hayCambioUsuario && !hayImagenesNuevas) {
+        nuevoRecurso === recursoOriginal && !hayCambioEstado && !hayCambioUsuario && !hayCambioSeguimiento && !hayImagenesNuevas) {
         if (mensajeSpan) {
             mensajeSpan.textContent = 'No hay cambios para guardar';
             mensajeSpan.className = 'guardar-mensaje guardar-mensaje-info';
@@ -3046,6 +3065,7 @@ async function guardarCambiosIncidencia() {
         if (nuevoUsuarioId !== undefined) {
             datosActualizacion.usuario_id = nuevoUsuarioId;
         }
+        datosActualizacion.seguimiento_id = nuevoSeguimientoId;
         if (hayImagenesNuevas) {
             datosActualizacion.imagenes = imagenesPendientesDetalle.map(img => ({
                 name: img.name,
@@ -3076,6 +3096,7 @@ async function guardarCambiosIncidencia() {
                 detalleActual.user_assigned = nuevoUsuarioId;
                 detalleActual.Id_Uduario_Gtask_Asignado = nuevoUsuarioId;
             }
+            detalleActual.user_follow = nuevoSeguimientoId;
             if (estadoPendienteGuardar) {
                 detalleActual.state = estadoPendienteGuardar;
                 estadoPendienteGuardar = null;
@@ -3331,10 +3352,12 @@ function hayCambiosPendientesDetalleIncidencia() {
     const fechaHoraInput = document.getElementById('edit-fecha-hora');
     const resourceInput = document.getElementById('edit-resource');
     const usuarioAsignadoSelect = document.getElementById('edit-usuario-asignado');
+    const usuarioSeguimientoSelect = document.getElementById('edit-usuario-seguimiento');
     const nuevaDescripcion = (descripcionInput && descripcionInput.value.trim()) || detalleActual.description || '';
     const nuevaFechaHora = (fechaHoraInput && fechaHoraInput.value) || '';
     const nuevoRecurso = (resourceInput && resourceInput.value.trim()) || detalleActual.resource || '';
     const nuevoUsuarioId = (usuarioAsignadoSelect && usuarioAsignadoSelect.value.trim()) || '';
+    const nuevoSeguimientoId = (usuarioSeguimientoSelect && usuarioSeguimientoSelect.value.trim()) || '';
 
     const descripcionOriginal = detalleActual.description || '';
     const tempDiv = document.createElement('div');
@@ -3356,12 +3379,14 @@ function hayCambiosPendientesDetalleIncidencia() {
 
     const recursoOriginal = detalleActual.resource || '';
     const usuarioOriginal = detalleActual.Id_Uduario_Gtask_Asignado || detalleActual.Id_Usuario_Gtask_Asignado || detalleActual.user_assigned || detalleActual.user || '';
+    const seguimientoOriginal = detalleActual.user_follow || '';
 
     return nuevaDescripcion !== descripcionOriginalTexto
         || (nuevaFechaHora && nuevaFechaHora !== fechaOriginalInput)
         || nuevoRecurso !== recursoOriginal
         || estadoPendienteGuardar !== null
         || (nuevoUsuarioId || '') !== String(usuarioOriginal || '')
+        || nuevoSeguimientoId !== String(seguimientoOriginal)
         || imagenesPendientesDetalle.length > 0;
 }
 
@@ -3394,6 +3419,8 @@ async function imprimirPDFPasandoPorActualizar() {
     }
     const nuevoRecurso = (resourceInput && resourceInput.value.trim()) || detalleActual.resource || '';
     const nuevoUsuarioId = (usuarioAsignadoSelect && usuarioAsignadoSelect.value.trim()) || null;
+    const usuarioSeguimientoSelect = document.getElementById('edit-usuario-seguimiento');
+    const nuevoSeguimientoId = (usuarioSeguimientoSelect && usuarioSeguimientoSelect.value.trim()) || '';
     const datosActualizacion = {
         id_gtask: idGtaskActual,
         descripcion: nuevaDescripcion,
@@ -3406,6 +3433,7 @@ async function imprimirPDFPasandoPorActualizar() {
     if (nuevoUsuarioId !== undefined && nuevoUsuarioId !== null) {
         datosActualizacion.usuario_id = nuevoUsuarioId;
     }
+    datosActualizacion.seguimiento_id = nuevoSeguimientoId;
     if (imagenesPendientesDetalle.length > 0) {
         datosActualizacion.imagenes = imagenesPendientesDetalle.map(img => ({
             name: img.name,

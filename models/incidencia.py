@@ -38,6 +38,8 @@ class Incidencia:
     work_description: Optional[bytes] = None  # Blob
     usuario: Optional[str] = None  # Guid - usuario asignado
     usuario_creador: Optional[str] = None  # Guid - usuario que creó/registró la incidencia
+    usuario_seguimiento: Optional[str] = None  # Id GTask del usuario de seguimiento
+    seguimiento_informado: bool = False
     comunicado_por_emt: Optional[bool] = None  # Comunicado por EMT (desde BC)
     es_peticion: bool = False  # True = orden de trabajo (BC: Es Peticion)
     archivos_imagen: list[str] = field(default_factory=list)  # Archivos de imagen asociados

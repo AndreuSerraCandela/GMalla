@@ -997,6 +997,9 @@ def actualizar_incidencia():
         # Actualizar usuario asignado si se proporciona (desde el modal de edición)
         if nuevo_usuario_id is not None:
             incidencia.usuario = (nuevo_usuario_id and str(nuevo_usuario_id).strip()) or None
+        if 'seguimiento_id' in data:
+            incidencia.seguimiento_informado = True
+            incidencia.usuario_seguimiento = (str(data.get('seguimiento_id') or '').strip() or None)
         
         imagenes_validas = [
             img for img in imagenes_nuevas
