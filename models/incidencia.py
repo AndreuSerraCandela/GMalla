@@ -62,6 +62,7 @@ class Incidencia:
             "FechaHora": self.fecha_hora.isoformat() if self.fecha_hora else None,
             "Usuario": self.usuario,
             "UsuarioCreador": self.usuario_creador,
+            "UsuarioSeguimiento": self.usuario_seguimiento,
             "ComunicadoPorEMT": self.comunicado_por_emt,
             "Es_Peticion": self.es_peticion,
             "ArchivosImagen": self.archivos_imagen,
@@ -108,6 +109,10 @@ class Incidencia:
         incidencia.usuario = data.get("Usuario")
         # Usuario creador: Id_Uduario_Gtask (en BC no existe UsuarioCreador; lo mapeamos desde Id_Uduario_Gtask)
         incidencia.usuario_creador = data.get("UsuarioCreador")
+        # Usuario seguimiento: Id_Usuario_Gtask_Seguimiento
+        incidencia.usuario_seguimiento = data.get("UsuarioSeguimiento") or data.get("usuario_seguimiento")
+        if incidencia.usuario_seguimiento is not None and not str(incidencia.usuario_seguimiento).strip():
+            incidencia.usuario_seguimiento = None
         # Comunicado por EMT (BC: Comunicado_por_EMT)
         val_emt = data.get("ComunicadoPorEMT") if "ComunicadoPorEMT" in data else data.get("Comunicado_por_EMT")
         incidencia.comunicado_por_emt = bool(val_emt) if val_emt is not None else None

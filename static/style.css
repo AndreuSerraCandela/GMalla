@@ -732,6 +732,10 @@ body {
 .vista-lista-recurso { white-space: nowrap; }
 .vista-lista-creador { white-space: nowrap; }
 .vista-lista-usuario { white-space: nowrap; }
+.vista-lista-seguimiento { white-space: nowrap; }
+.vista-lista-tabla thead th[data-sort="usuario_seguimiento"] {
+    min-width: 9rem;
+}
 .vista-lista-empty {
     text-align: center;
     color: #666;

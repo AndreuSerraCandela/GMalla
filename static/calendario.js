@@ -90,7 +90,7 @@ let vistaListaEstado = {
     columnFilters: {}
 };
 
-const VISTA_LISTA_SORT_COLS = ['no', 'fecha', 'estado', 'descripcion', 'tipo', 'subtipo', 'comunicado_emt', 'recurso', 'usuario_creador', 'usuario'];
+const VISTA_LISTA_SORT_COLS = ['no', 'fecha', 'estado', 'descripcion', 'tipo', 'subtipo', 'comunicado_emt', 'recurso', 'usuario_creador', 'usuario', 'usuario_seguimiento'];
 
 /** Convierte valores heterogéneos (bool/string/num) a booleano real. */
 function esOrdenTrabajo(incidencia) {
@@ -145,6 +145,10 @@ function getVistaListaColumnDisplayValue(inc, col) {
     if (col === 'recurso') return formatearRecursoDisplay(inc);
     if (col === 'usuario_creador') return obtenerNombreUsuario(inc.usuario_creador,false) || '';
     if (col === 'usuario') return obtenerNombreUsuario(inc.usuario,true) || '';
+    if (col === 'usuario_seguimiento') {
+        if (!inc.usuario_seguimiento) return 'Sin seguimiento';
+        return obtenerNombreUsuario(inc.usuario_seguimiento, false) || 'Sin seguimiento';
+    }
     return '';
 }
 
@@ -1911,11 +1915,14 @@ function generarVistaLista() {
             const userNombre = nombreUsuario(inc.usuario).toLowerCase();
             const creador = (inc.usuario_creador || '').toLowerCase();
             const creadorNombre = nombreUsuario(inc.usuario_creador).toLowerCase();
+            const seguimiento = (inc.usuario_seguimiento || '').toLowerCase();
+            const seguimientoNombre = nombreUsuario(inc.usuario_seguimiento).toLowerCase();
             const comunicadoEMT = (parseBooleanLike(inc.comunicado_por_emt) ? 'sí' : 'no');
             const estadoInc = formatearEstado(inc.estado).toLowerCase();
             return no.includes(q) || desc.includes(q) || tipo.includes(q) || subtipo.includes(q)
                 || recursoNombre.includes(q) || recursoNum.includes(q)
                 || dir.includes(q) || user.includes(q) || userNombre.includes(q) || creador.includes(q) || creadorNombre.includes(q)
+                || seguimiento.includes(q) || seguimientoNombre.includes(q)
                 || comunicadoEMT.includes(q) || estadoInc.includes(q);
         });
     }
@@ -1933,6 +1940,7 @@ function generarVistaLista() {
         if (c === 'recurso') return (inc.resource_name || inc.recurso || '').toLowerCase();
         if (c === 'usuario_creador') return (obtenerNombreUsuario(inc.usuario_creador,false) || '').toLowerCase();
         if (c === 'usuario') return (obtenerNombreUsuario(inc.usuario,true) || '').toLowerCase();
+        if (c === 'usuario_seguimiento') return getVistaListaColumnDisplayValue(inc, 'usuario_seguimiento').toLowerCase();
         return '';
     };
     incidencias.sort((a, b) => {
@@ -1963,7 +1971,7 @@ function generarVistaLista() {
         const msgFiltro = (vistaListaEstado.filtro || hayFiltroCols)
             ? 'No hay coincidencias con los filtros aplicados.'
             : 'No hay incidencias que mostrar. Usa "Refrescar" para cargar datos.';
-        tr.innerHTML = '<td colspan="11" class="vista-lista-empty">' + msgFiltro + '</td>';
+        tr.innerHTML = '<td colspan="12" class="vista-lista-empty">' + msgFiltro + '</td>';
         tbody.appendChild(tr);
         actualizarIndicadoresAutofiltroVistaLista();
         return;
@@ -1980,6 +1988,7 @@ function generarVistaLista() {
         const comunicadoEMT = parseBooleanLike(inc.comunicado_por_emt) ? 'Sí' : 'No';
         const creadoPor = obtenerNombreUsuario(inc.usuario_creador,false);
         const usuarioAsignado = obtenerNombreUsuario(inc.usuario,true);
+        const usuarioSeguimiento = getVistaListaColumnDisplayValue(inc, 'usuario_seguimiento');
         const idGtask = inc.id_gtask || inc.no;
         const noIncidencia = (esOrdenTrabajo(inc) ? 'OT ' : '') + (inc.no || idGtask);
         const p = estado.permisos || {};
@@ -2000,6 +2009,7 @@ function generarVistaLista() {
             <td class="vista-lista-recurso">${escapeHtml(recurso)}</td>
             <td class="vista-lista-creador">${escapeHtml(creadoPor)}</td>
             <td class="vista-lista-usuario">${escapeHtml(usuarioAsignado)}</td>
+            <td class="vista-lista-seguimiento">${escapeHtml(usuarioSeguimiento)}</td>
             <td class="col-acciones vista-lista-td-acciones"><div class="vista-lista-acciones">${botonesAcciones || '—'}</div></td>
         `;
         if (puedeModificar) tr.querySelector('.btn-editar-lista')?.addEventListener('click', () => abrirDetalleIncidencia(idGtask));

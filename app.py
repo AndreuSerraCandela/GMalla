@@ -98,6 +98,7 @@ def _incidencia_a_json(inc, nombres_recursos: dict) -> dict:
         'subtipo_incidencia': getattr(inc, 'subtipo_incidencia', None),
         'usuario': inc.usuario,
         'usuario_creador': getattr(inc, 'usuario_creador', None),
+        'usuario_seguimiento': getattr(inc, 'usuario_seguimiento', None),
         'comunicado_por_emt': getattr(inc, 'comunicado_por_emt', None),
         'es_peticion': getattr(inc, 'es_peticion', False),
         'fecha_hora': _a_iso_fecha_o_datetime(inc.fecha_hora),

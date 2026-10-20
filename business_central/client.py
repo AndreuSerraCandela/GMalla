@@ -174,6 +174,12 @@ class BusinessCentralClient:
         id_asignado = inc_data.get("Id_Uduario_Gtask_Asignado") or inc_data.get("Id_Usuario_Gtask_Asignado")
         if id_asignado and not str(id_asignado).strip():
             id_asignado = None
+        id_seguimiento = (
+            inc_data.get("Id_Usuario_Gtask_Seguimiento")
+            or inc_data.get("Id_Uduario_Gtask_Seguimiento")
+        )
+        if id_seguimiento and not str(id_seguimiento).strip():
+            id_seguimiento = None
         id_tarea_gtask = inc_data.get("ID_Tarea_Gtask", "")
         if id_tarea_gtask == "":
             id_asignado = None
@@ -189,6 +195,7 @@ class BusinessCentralClient:
             "Fecha": fecha.isoformat() if fecha else None,
             "Usuario": id_asignado,
             "UsuarioCreador": id_creador,
+            "UsuarioSeguimiento": id_seguimiento,
             "Id_Gtask": inc_data.get("Id_Gtask", ""),
             "ID_Tarea_Gtask": inc_data.get("ID_Tarea_Gtask", ""),
             "URL_Primera_Imagen": inc_data.get("URL_Primera_Imagen", ""),
