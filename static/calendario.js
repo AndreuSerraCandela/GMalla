@@ -2423,6 +2423,7 @@ let detalleActual = null;
 let idGtaskActual = null;
 let detalleCargadoId = null;
 let detalleRequestId = 0;
+const INCIDENCIA_CLIENT_VERSION = '20261028-2';
 /** Imágenes nuevas pendientes de enviar a BC al guardar ({ name, file }) */
 let imagenesPendientesDetalle = [];
 /** Estado pendiente de guardar (ej. 'Cerrada') cuando el usuario pulsa "Cerrar incidencia" */
@@ -3075,6 +3076,7 @@ async function guardarCambiosIncidencia() {
         // Preparar datos para enviar (incluir estado si se pulsó "Cerrar incidencia")
         const datosActualizacion = {
             id_gtask: idGtaskActual,
+            client_version: INCIDENCIA_CLIENT_VERSION,
             descripcion: nuevaDescripcion,
             fecha_hora: nuevaFechaHora,
             recurso: nuevoRecurso
@@ -3443,6 +3445,7 @@ async function imprimirPDFPasandoPorActualizar() {
     const nuevoSeguimientoId = (usuarioSeguimientoSelect && usuarioSeguimientoSelect.value.trim()) || '';
     const datosActualizacion = {
         id_gtask: idGtaskActual,
+        client_version: INCIDENCIA_CLIENT_VERSION,
         descripcion: nuevaDescripcion,
         fecha_hora: nuevaFechaHora || undefined,
         recurso: nuevoRecurso

@@ -921,7 +921,12 @@ def crear_peticion():
 def actualizar_incidencia():
     """API para actualizar descripción, fecha/hora y recurso de una incidencia"""
     try:
-        data = request.json
+        data = request.get_json(silent=True) or {}
+        if data.get('client_version') != '20261028-2':
+            return jsonify({
+                'success': False,
+                'error': 'Esta pestaña de Taller está desactualizada. Recarga la página antes de modificar incidencias.'
+            }), 409
         
         id_gtask = data.get('id_gtask')
         nueva_descripcion = data.get('descripcion')
