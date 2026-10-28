@@ -2018,9 +2018,9 @@ function generarVistaLista() {
                 const response = await fetch(`/api/detalle-incidencia/${encodeURIComponent(idGtask)}`);
                 const data = await response.json();
                 if (data.success && data.detalle) {
-                    detalleActual = data.detalle;
-                    idGtaskActual = idGtask;
-                    await imprimirPDFPasandoPorActualizar();
+                    // Imprimir desde la lista nunca debe reutilizar ni guardar el
+                    // formulario del modal, que puede pertenecer a otra incidencia.
+                    await generarPDF(data.detalle, idGtask);
                 } else {
                     alert('No se pudo cargar el detalle para imprimir: ' + (data.error || ''));
                 }
@@ -2421,6 +2421,8 @@ function mostrarIncidenciasLibres() {
 // Variable global para almacenar el detalle actual y el id_gtask
 let detalleActual = null;
 let idGtaskActual = null;
+let detalleCargadoId = null;
+let detalleRequestId = 0;
 /** Imágenes nuevas pendientes de enviar a BC al guardar ({ name, file }) */
 let imagenesPendientesDetalle = [];
 /** Estado pendiente de guardar (ej. 'Cerrada') cuando el usuario pulsa "Cerrar incidencia" */
@@ -2433,9 +2435,13 @@ let rotacionesImagenes = {};
 async function abrirDetalleIncidencia(idGtask) {
     const modal = document.getElementById('detalle-modal');
     const contenido = document.getElementById('detalle-contenido');
+    const requestId = ++detalleRequestId;
     
     idGtaskActual = idGtask;
+    detalleActual = null;
+    detalleCargadoId = null;
     imagenesPendientesDetalle = [];
+    estadoPendienteGuardar = null;
     
     // Mostrar modal con loading
     contenido.innerHTML = '<div class="loading">Cargando detalle de la incidencia...</div>';
@@ -2444,10 +2450,13 @@ async function abrirDetalleIncidencia(idGtask) {
     try {
         const response = await fetch(`/api/detalle-incidencia/${encodeURIComponent(idGtask)}`);
         const data = await response.json();
+
+        // Si mientras cargaba se abrió/cerró otro detalle, ignorar esta respuesta.
+        if (requestId !== detalleRequestId || idGtaskActual !== idGtask) return;
         
         if (data.success && data.detalle) {
             detalleActual = data.detalle;
-            estadoPendienteGuardar = null;
+            detalleCargadoId = idGtask;
             mostrarDetalleIncidencia(data.detalle);
         } else {
             contenido.innerHTML = `
@@ -2458,6 +2467,7 @@ async function abrirDetalleIncidencia(idGtask) {
             `;
         }
     } catch (error) {
+        if (requestId !== detalleRequestId || idGtaskActual !== idGtask) return;
         contenido.innerHTML = `
             <div class="error-message">
                 <p>❌ Error de conexión</p>
@@ -2981,7 +2991,7 @@ async function procesarArchivosImagenDetalle(files) {
 }
 
 async function guardarCambiosIncidencia() {
-    if (!detalleActual || !idGtaskActual) {
+    if (!detalleActual || !idGtaskActual || detalleCargadoId !== idGtaskActual) {
         alert('No hay detalle de incidencia disponible');
         return;
     }
@@ -4236,6 +4246,19 @@ function deseleccionarTodosUsuarios() {
     actualizarFiltroDesdeCheckboxes();
 }
 
+function cerrarDetalleIncidencia() {
+    detalleRequestId++;
+    detalleActual = null;
+    idGtaskActual = null;
+    detalleCargadoId = null;
+    estadoPendienteGuardar = null;
+    imagenesPendientesDetalle = [];
+    const contenido = document.getElementById('detalle-contenido');
+    if (contenido) contenido.innerHTML = '';
+    const modal = document.getElementById('detalle-modal');
+    if (modal) modal.style.display = 'none';
+}
+
 // Cerrar modal de detalle
 document.addEventListener('DOMContentLoaded', () => {
     const modal = document.getElementById('detalle-modal');
@@ -4243,14 +4266,12 @@ document.addEventListener('DOMContentLoaded', () => {
     const imprimirBtn = document.getElementById('imprimir-pdf-btn');
     
     if (closeBtn) {
-        closeBtn.addEventListener('click', () => {
-            modal.style.display = 'none';
-        });
+        closeBtn.addEventListener('click', cerrarDetalleIncidencia);
     }
     
     if (imprimirBtn) {
         imprimirBtn.addEventListener('click', () => {
-            if (detalleActual && idGtaskActual) {
+            if (detalleActual && idGtaskActual && detalleCargadoId === idGtaskActual) {
                 imprimirPDFPasandoPorActualizar();
             } else {
                 alert('No hay detalle de incidencia disponible para imprimir');
@@ -4261,7 +4282,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const waTallerBtn = document.getElementById('whatsapp-taller-btn');
     if (waTallerBtn) {
         waTallerBtn.addEventListener('click', () => {
-            if (detalleActual && idGtaskActual) {
+            if (detalleActual && idGtaskActual && detalleCargadoId === idGtaskActual) {
                 notificarWhatsappTaller();
             } else {
                 alert('No hay detalle de incidencia disponible');
@@ -4271,7 +4292,7 @@ document.addEventListener('DOMContentLoaded', () => {
     
     window.addEventListener('click', (e) => {
         if (e.target === modal) {
-            modal.style.display = 'none';
+            cerrarDetalleIncidencia();
         }
     });
 });
