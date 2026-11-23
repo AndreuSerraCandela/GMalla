@@ -36,9 +36,12 @@ class Incidencia:
     tipo_elemento: TipoElemento = TipoElemento.RECURSO  # Option
     fecha_hora: Optional[datetime] = None  # DateTime
     work_description: Optional[bytes] = None  # Blob
-    usuario: Optional[str] = None  # Guid - usuario asignado
-    usuario_creador: Optional[str] = None  # Guid - usuario que creó/registró la incidencia
+    usuario: Optional[str] = None  # Id GTask - usuario asignado
+    usuario_creador: Optional[str] = None  # Id GTask - usuario que creó/registró la incidencia
     usuario_seguimiento: Optional[str] = None  # Id GTask del usuario de seguimiento
+    nombre_usuario: Optional[str] = None  # Nombre legible asignado (BC: Usuario_Asignado)
+    nombre_usuario_creador: Optional[str] = None  # Nombre legible creador (BC: Usuario)
+    nombre_usuario_seguimiento: Optional[str] = None  # Nombre legible seguimiento (BC: Usuario_Seguimiento)
     seguimiento_informado: bool = False
     comunicado_por_emt: Optional[bool] = None  # Comunicado por EMT (desde BC)
     es_peticion: bool = False  # True = orden de trabajo (BC: Es Peticion)
@@ -63,6 +66,9 @@ class Incidencia:
             "Usuario": self.usuario,
             "UsuarioCreador": self.usuario_creador,
             "UsuarioSeguimiento": self.usuario_seguimiento,
+            "NombreUsuario": self.nombre_usuario,
+            "NombreUsuarioCreador": self.nombre_usuario_creador,
+            "NombreUsuarioSeguimiento": self.nombre_usuario_seguimiento,
             "ComunicadoPorEMT": self.comunicado_por_emt,
             "Es_Peticion": self.es_peticion,
             "ArchivosImagen": self.archivos_imagen,
@@ -113,6 +119,19 @@ class Incidencia:
         incidencia.usuario_seguimiento = data.get("UsuarioSeguimiento") or data.get("usuario_seguimiento")
         if incidencia.usuario_seguimiento is not None and not str(incidencia.usuario_seguimiento).strip():
             incidencia.usuario_seguimiento = None
+        # Nombres legibles desde BC (Usuario / Usuario_Asignado / Usuario_Seguimiento)
+        def _nombre(val):
+            if val is None:
+                return None
+            s = str(val).strip()
+            return s or None
+        incidencia.nombre_usuario = _nombre(data.get("NombreUsuario") or data.get("nombre_usuario"))
+        incidencia.nombre_usuario_creador = _nombre(
+            data.get("NombreUsuarioCreador") or data.get("nombre_usuario_creador")
+        )
+        incidencia.nombre_usuario_seguimiento = _nombre(
+            data.get("NombreUsuarioSeguimiento") or data.get("nombre_usuario_seguimiento")
+        )
         # Comunicado por EMT (BC: Comunicado_por_EMT)
         val_emt = data.get("ComunicadoPorEMT") if "ComunicadoPorEMT" in data else data.get("Comunicado_por_EMT")
         incidencia.comunicado_por_emt = bool(val_emt) if val_emt is not None else None

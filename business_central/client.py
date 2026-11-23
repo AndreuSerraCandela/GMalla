@@ -196,6 +196,10 @@ class BusinessCentralClient:
             "Usuario": id_asignado,
             "UsuarioCreador": id_creador,
             "UsuarioSeguimiento": id_seguimiento,
+            # Nombres legibles publicados en ListaIncidencias (no confundir con los Id_*)
+            "NombreUsuario": (inc_data.get("Usuario_Asignado") or "").strip() or None,
+            "NombreUsuarioCreador": (inc_data.get("Usuario") or "").strip() or None,
+            "NombreUsuarioSeguimiento": (inc_data.get("Usuario_Seguimiento") or "").strip() or None,
             "Id_Gtask": inc_data.get("Id_Gtask", ""),
             "ID_Tarea_Gtask": inc_data.get("ID_Tarea_Gtask", ""),
             "URL_Primera_Imagen": inc_data.get("URL_Primera_Imagen", ""),

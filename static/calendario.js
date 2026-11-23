@@ -143,11 +143,11 @@ function getVistaListaColumnDisplayValue(inc, col) {
     if (col === 'subtipo') return inc.subtipo_incidencia || '-';
     if (col === 'comunicado_emt') return parseBooleanLike(inc.comunicado_por_emt) ? 'Sí' : 'No';
     if (col === 'recurso') return formatearRecursoDisplay(inc);
-    if (col === 'usuario_creador') return obtenerNombreUsuario(inc.usuario_creador,false) || '';
-    if (col === 'usuario') return obtenerNombreUsuario(inc.usuario,true) || '';
+    if (col === 'usuario_creador') return obtenerNombreUsuario(inc.usuario_creador, false, inc.nombre_usuario_creador) || '';
+    if (col === 'usuario') return obtenerNombreUsuario(inc.usuario, true, inc.nombre_usuario) || '';
     if (col === 'usuario_seguimiento') {
-        if (!inc.usuario_seguimiento) return 'Sin seguimiento';
-        return obtenerNombreUsuario(inc.usuario_seguimiento, false) || 'Sin seguimiento';
+        if (!inc.usuario_seguimiento && !(inc.nombre_usuario_seguimiento || '').trim()) return 'Sin seguimiento';
+        return obtenerNombreUsuario(inc.usuario_seguimiento, false, inc.nombre_usuario_seguimiento) || 'Sin seguimiento';
     }
     return '';
 }
@@ -1914,14 +1914,16 @@ function generarVistaLista() {
             const user = (inc.usuario || '').toLowerCase();
             const userNombre = nombreUsuario(inc.usuario).toLowerCase();
             const creador = (inc.usuario_creador || '').toLowerCase();
-            const creadorNombre = nombreUsuario(inc.usuario_creador).toLowerCase();
+            const creadorNombre = (inc.nombre_usuario_creador || nombreUsuario(inc.usuario_creador) || '').toLowerCase();
             const seguimiento = (inc.usuario_seguimiento || '').toLowerCase();
-            const seguimientoNombre = nombreUsuario(inc.usuario_seguimiento).toLowerCase();
+            const seguimientoNombre = (inc.nombre_usuario_seguimiento || nombreUsuario(inc.usuario_seguimiento) || '').toLowerCase();
+            const asignadoNombre = (inc.nombre_usuario || userNombre || '').toLowerCase();
             const comunicadoEMT = (parseBooleanLike(inc.comunicado_por_emt) ? 'sí' : 'no');
             const estadoInc = formatearEstado(inc.estado).toLowerCase();
             return no.includes(q) || desc.includes(q) || tipo.includes(q) || subtipo.includes(q)
                 || recursoNombre.includes(q) || recursoNum.includes(q)
-                || dir.includes(q) || user.includes(q) || userNombre.includes(q) || creador.includes(q) || creadorNombre.includes(q)
+                || dir.includes(q) || user.includes(q) || userNombre.includes(q) || asignadoNombre.includes(q)
+                || creador.includes(q) || creadorNombre.includes(q)
                 || seguimiento.includes(q) || seguimientoNombre.includes(q)
                 || comunicadoEMT.includes(q) || estadoInc.includes(q);
         });
@@ -1938,8 +1940,8 @@ function generarVistaLista() {
         if (c === 'subtipo') return (inc.subtipo_incidencia || '').toLowerCase();
         if (c === 'comunicado_emt') return parseBooleanLike(inc.comunicado_por_emt) ? 'sí' : 'no';
         if (c === 'recurso') return (inc.resource_name || inc.recurso || '').toLowerCase();
-        if (c === 'usuario_creador') return (obtenerNombreUsuario(inc.usuario_creador,false) || '').toLowerCase();
-        if (c === 'usuario') return (obtenerNombreUsuario(inc.usuario,true) || '').toLowerCase();
+        if (c === 'usuario_creador') return (obtenerNombreUsuario(inc.usuario_creador, false, inc.nombre_usuario_creador) || '').toLowerCase();
+        if (c === 'usuario') return (obtenerNombreUsuario(inc.usuario, true, inc.nombre_usuario) || '').toLowerCase();
         if (c === 'usuario_seguimiento') return getVistaListaColumnDisplayValue(inc, 'usuario_seguimiento').toLowerCase();
         return '';
     };
@@ -1986,8 +1988,8 @@ function generarVistaLista() {
         const tipoIncidencia = inc.tipo_incidencia || '-';
         const subtipoIncidencia = inc.subtipo_incidencia || '-';
         const comunicadoEMT = parseBooleanLike(inc.comunicado_por_emt) ? 'Sí' : 'No';
-        const creadoPor = obtenerNombreUsuario(inc.usuario_creador,false);
-        const usuarioAsignado = obtenerNombreUsuario(inc.usuario,true);
+        const creadoPor = obtenerNombreUsuario(inc.usuario_creador, false, inc.nombre_usuario_creador);
+        const usuarioAsignado = obtenerNombreUsuario(inc.usuario, true, inc.nombre_usuario);
         const usuarioSeguimiento = getVistaListaColumnDisplayValue(inc, 'usuario_seguimiento');
         const idGtask = inc.id_gtask || inc.no;
         const noIncidencia = (esOrdenTrabajo(inc) ? 'OT ' : '') + (inc.no || idGtask);
@@ -2478,35 +2480,49 @@ async function abrirDetalleIncidencia(idGtask) {
     }
 }
 
-// Obtener nombre de usuario por ID
-function obtenerNombreUsuario(userId,asignado) {
-    if (!userId) {
-        if (asignado) {
-            return 'Sin asignar';
-        } else {
-            return 'N/A';
-        }
+/** Extrae un id de usuario usable (string) desde id plano u objeto Mongo `{ $oid }` / `_id`. */
+function normalizarIdUsuario(raw) {
+    if (raw == null || raw === '') return '';
+    if (typeof raw === 'object') {
+        if (raw.$oid) return String(raw.$oid).trim();
+        if (raw._id) return normalizarIdUsuario(raw._id);
+        if (raw.id) return normalizarIdUsuario(raw.id);
+        return '';
     }
-       
-    
-    
+    return String(raw).trim();
+}
+
+/** Id canónico de un objeto usuario de GTask/API. */
+function idDeUsuarioObj(u) {
+    if (!u) return '';
+    return normalizarIdUsuario(u.id || u.user_id || u.userId || u._id || '');
+}
+
+// Obtener nombre de usuario por ID (opcionalmente con nombre ya resuelto desde BC)
+function obtenerNombreUsuario(userId, asignado, nombreResuelto) {
+    const nombreBc = (nombreResuelto != null && String(nombreResuelto).trim()) ? String(nombreResuelto).trim() : '';
+    if (nombreBc) return nombreBc;
+
+    const id = normalizarIdUsuario(userId);
+    if (!id) {
+        return asignado ? 'Sin asignar' : 'N/A';
+    }
+
     // Buscar en la lista de usuarios cargados
-    const usuario = estado.usuarios.find(u => {
-        const id = String(u.id || u.user_id || u.userId || u._id || '');
-        return id === String(userId) || id.includes(String(userId)) || String(userId).includes(id);
+    const usuario = (estado.usuarios || []).find(u => {
+        const uid = idDeUsuarioObj(u);
+        return uid && (uid === id || uid.includes(id) || id.includes(uid));
     });
-    
+
     if (usuario) {
-        if (usuario.suranme) {
-            return usuario.name+' '+usuario.suranme;
-        } else {
-            return usuario.name;
-        }
-        
+        const nombre = usuario.name || usuario.username || usuario.nombre || '';
+        const ape = usuario.surname || usuario.suranme || usuario.lastname || usuario.lastName || '';
+        if (nombre && ape) return `${nombre} ${ape}`.trim();
+        if (nombre) return nombre;
     }
-    
+
     // Si no se encuentra, devolver el ID
-    return String(userId);
+    return id;
 }
 
 // Mostrar detalle de incidencia en el modal
@@ -2530,12 +2546,12 @@ function mostrarDetalleIncidencia(detalle) {
         }
     }
     
-    // Usuario creador (solo lectura): Id_Uduario_Gtask; en BC el nombre es "Usuario"
-    const userIdCreador = detalle.user_name;
-    const nombreCreador = obtenerNombreUsuario(userIdCreador,false);
+    // Detalle BC: user/user_assigned_name/user_follow_name = nombres; user_name/user_assigned/user_follow = ids
+    const userIdCreador = detalle.user_name || detalle.Id_Uduario_Gtask || detalle.Id_Usuario_Gtask;
+    const nombreCreador = obtenerNombreUsuario(userIdCreador, false, detalle.user || (incCache && incCache.nombre_usuario_creador));
     // Usuario asignado: ID puede venir en varios campos del detalle BC
     const userIdAsignado = detalle.Id_Uduario_Gtask_Asignado || detalle.Id_Usuario_Gtask_Asignado || detalle.user_assigned;
-    const nombreUsuario = obtenerNombreUsuario(userIdAsignado,true);
+    const nombreUsuario = obtenerNombreUsuario(userIdAsignado, true, detalle.user_assigned_name || (incCache && incCache.nombre_usuario));
     const userIdSeguimiento = detalle.user_follow || '';
     
     // Formatear geolocalización (puntoX es longitud, puntoY es latitud) - solo el icono
@@ -2666,9 +2682,10 @@ function mostrarDetalleIncidencia(detalle) {
                     <select id="edit-usuario-asignado" class="detalle-input detalle-select-usuario">
                         <option value="">— Sin asignar —</option>
                         ${(estado.usuarios || []).map(u => {
-                            const uid = String(u.id || u.user_id || u.userId || u._id || '');
+                            const uid = idDeUsuarioObj(u);
                             const nom = u.name || u.username || u.nombre || uid;
-                            const sel = (uid && userIdAsignado && (uid === String(userIdAsignado) || uid.includes(String(userIdAsignado)) || String(userIdAsignado).includes(uid))) ? ' selected' : '';
+                            const idAsig = normalizarIdUsuario(userIdAsignado);
+                            const sel = (uid && idAsig && (uid === idAsig || uid.includes(idAsig) || idAsig.includes(uid))) ? ' selected' : '';
                             return `<option value="${escapeHtml(uid)}"${sel}>${escapeHtml(nom)}</option>`;
                         }).join('')}
                     </select>
@@ -2678,9 +2695,10 @@ function mostrarDetalleIncidencia(detalle) {
                     <select id="edit-usuario-seguimiento" class="detalle-input detalle-select-usuario">
                         <option value="">— Sin seguimiento —</option>
                         ${(estado.usuarios || []).map(u => {
-                            const uid = String(u.id || u.user_id || u.userId || u._id || '');
+                            const uid = idDeUsuarioObj(u);
                             const nom = u.name || u.username || u.nombre || uid;
-                            const sel = (uid && userIdSeguimiento && (uid === String(userIdSeguimiento) || uid.includes(String(userIdSeguimiento)) || String(userIdSeguimiento).includes(uid))) ? ' selected' : '';
+                            const idSeg = normalizarIdUsuario(userIdSeguimiento);
+                            const sel = (uid && idSeg && (uid === idSeg || uid.includes(idSeg) || idSeg.includes(uid))) ? ' selected' : '';
                             return `<option value="${escapeHtml(uid)}"${sel}>${escapeHtml(nom)}</option>`;
                         }).join('')}
                     </select>
